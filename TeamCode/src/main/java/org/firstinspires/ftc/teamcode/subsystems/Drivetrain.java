@@ -7,40 +7,64 @@ public class Drivetrain {
 
 	private final RobotHardware robot;
 
+	// Per-motor scale factors for calibration (index: 0=topLeft, 1=backLeft, 2=topRight, 3=backRight)
+	private double[] motorScales = {1.0, 1.0, 1.0, 1.0};
+
+	public static final int MOTOR_TOP_LEFT  = 0;
+	public static final int MOTOR_BACK_LEFT  = 1;
+	public static final int MOTOR_TOP_RIGHT  = 2;
+	public static final int MOTOR_BACK_RIGHT = 3;
+
 	public Drivetrain(RobotHardware robot) {
 		this.robot = robot;
+	}
+
+	public void setMotorScale(int motorIndex, double scale) {
+		if (motorIndex >= 0 && motorIndex < motorScales.length) {
+			motorScales[motorIndex] = Math.max(Constants.MOTOR_SCALE_MIN, Math.min(Constants.MOTOR_SCALE_MAX, scale));
+		}
+	}
+
+	public double getMotorScale(int motorIndex) {
+		if (motorIndex >= 0 && motorIndex < motorScales.length) {
+			return motorScales[motorIndex];
+		}
+		return 1.0;
 	}
 
 	public void drive(double y, double x, double rx) {
 		//Control orientation
 		double adjustedY = -y;
-    //Strafing
+		//Strafing
 		double adjustedX = -x;
-    //Rotation
+		//Rotation
 		double adjustedRx = rx;
 
-		//square input behaviour so it travels more precisely with small joystick movements. 
+		//square input behaviour so it travels more precisely with small joystick movements.
 		adjustedY = Math.signum(adjustedY) * Math.pow(adjustedY, 2) * Constants.DRIVE_SPEED;
 		adjustedX = Math.signum(adjustedX) * Math.pow(adjustedX, 2) * Constants.DRIVE_SPEED;
 		adjustedRx = Math.signum(adjustedRx) * Math.pow(adjustedRx, 2) * Constants.DRIVE_SPEED;
 
-//Drivetrain equation that incorporates both strafing and rotations into the wheels
-		double frontLeft = adjustedY + adjustedX + adjustedRx;
-		double backLeftP = adjustedY - adjustedX + adjustedRx;
+		//Drivetrain equation that incorporates both strafing and rotations into the wheels
+		double frontLeft  = adjustedY + adjustedX + adjustedRx;
+		double backLeftP  = adjustedY - adjustedX + adjustedRx;
 		double frontRight = adjustedY - adjustedX - adjustedRx;
 		double backRightP = adjustedY + adjustedX - adjustedRx;
 
+		// Normalize against raw (unscaled) values so the calibration scales are not
+		// counteracted by the normalization denominator.
 		double max = Math.max(Math.abs(frontLeft), Math.max(Math.abs(backLeftP),
 				Math.max(Math.abs(frontRight), Math.abs(backRightP))));
 		if (max > 1.0) {
-			frontLeft /= max;
-			backLeftP /= max;
+			frontLeft  /= max;
+			backLeftP  /= max;
 			frontRight /= max;
 			backRightP /= max;
 		}
 
-		robot.topLeft.setPower(frontLeft);
-		robot.backLeft.setPower(backLeftP);
-		robot.topRight.setPower(frontRight);
-		robot.backRight.setPower(backRightP);
+		// Apply per-motor calibration scales after normalization, clamping to [-1, 1].
+		robot.topLeft.setPower(Math.max(-1.0, Math.min(1.0, frontLeft  * motorScales[MOTOR_TOP_LEFT])));
+		robot.backLeft.setPower(Math.max(-1.0, Math.min(1.0, backLeftP  * motorScales[MOTOR_BACK_LEFT])));
+		robot.topRight.setPower(Math.max(-1.0, Math.min(1.0, frontRight * motorScales[MOTOR_TOP_RIGHT])));
+		robot.backRight.setPower(Math.max(-1.0, Math.min(1.0, backRightP * motorScales[MOTOR_BACK_RIGHT])));
 	}
