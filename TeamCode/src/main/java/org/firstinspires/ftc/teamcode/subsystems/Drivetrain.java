@@ -8,7 +8,12 @@ public class Drivetrain {
 	private final RobotHardware robot;
 
 	// Per-motor scale factors for calibration (index: 0=topLeft, 1=backLeft, 2=topRight, 3=backRight)
-	private double[] motorScales = {1.0, 1.0, 1.0, 1.0};
+	private double[] motorScales = {
+			Constants.TOP_LEFT_SCALE,
+			Constants.BACK_LEFT_SCALE,
+			Constants.TOP_RIGHT_SCALE,
+			Constants.BACK_RIGHT_SCALE
+	};
 
 	public static final int MOTOR_TOP_LEFT  = 0;
 	public static final int MOTOR_BACK_LEFT  = 1;
@@ -63,8 +68,13 @@ public class Drivetrain {
 		}
 
 		// Apply per-motor calibration scales after normalization, clamping to [-1, 1].
-		robot.topLeft.setPower(Math.max(-1.0, Math.min(1.0, frontLeft  * motorScales[MOTOR_TOP_LEFT])));
-		robot.backLeft.setPower(Math.max(-1.0, Math.min(1.0, backLeftP  * motorScales[MOTOR_BACK_LEFT])));
-		robot.topRight.setPower(Math.max(-1.0, Math.min(1.0, frontRight * motorScales[MOTOR_TOP_RIGHT])));
-		robot.backRight.setPower(Math.max(-1.0, Math.min(1.0, backRightP * motorScales[MOTOR_BACK_RIGHT])));
+		robot.topLeft.setPower(clampPower(frontLeft  * motorScales[MOTOR_TOP_LEFT]));
+		robot.backLeft.setPower(clampPower(backLeftP  * motorScales[MOTOR_BACK_LEFT]));
+		robot.topRight.setPower(clampPower(frontRight * motorScales[MOTOR_TOP_RIGHT]));
+		robot.backRight.setPower(clampPower(backRightP * motorScales[MOTOR_BACK_RIGHT]));
 	}
+
+	private static double clampPower(double power) {
+		return Math.max(-1.0, Math.min(1.0, power));
+	}
+}
