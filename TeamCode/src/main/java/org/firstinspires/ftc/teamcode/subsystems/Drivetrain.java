@@ -74,6 +74,27 @@ public class Drivetrain {
 		robot.backRight.setPower(clampPower(backRightP * motorScales[MOTOR_BACK_RIGHT]));
 	}
 
+	public void driveRaw(double y, double x, double rx) {
+		double frontLeft  =  y + x + rx;
+		double backLeft   =  y - x + rx;
+		double frontRight =  y - x - rx;
+		double backRight  =  y + x - rx;
+
+		double max = Math.max(Math.abs(frontLeft), Math.max(Math.abs(backLeft),
+				Math.max(Math.abs(frontRight), Math.abs(backRight))));
+		if (max > 1.0) {
+			frontLeft  /= max;
+			backLeft   /= max;
+			frontRight /= max;
+			backRight  /= max;
+		}
+
+		robot.topLeft.setPower(clampPower(frontLeft  * motorScales[MOTOR_TOP_LEFT]));
+		robot.backLeft.setPower(clampPower(backLeft   * motorScales[MOTOR_BACK_LEFT]));
+		robot.topRight.setPower(clampPower(frontRight * motorScales[MOTOR_TOP_RIGHT]));
+		robot.backRight.setPower(clampPower(backRight  * motorScales[MOTOR_BACK_RIGHT]));
+	}
+
 	private static double clampPower(double power) {
 		return Math.max(-1.0, Math.min(1.0, power));
 	}
