@@ -14,4 +14,19 @@ public final class Constants {
 	public static final double BACK_LEFT_SCALE = 1.40;
 	public static final double TOP_RIGHT_SCALE = 1.00;
 	public static final double BACK_RIGHT_SCALE = 1.40;
+
+	// Vision follow / approach deadbands (tune on Driver Station in Limelight Seek Tag)
+	public static final double VISION_BEARING_DEADBAND_DEG = 5.0;
+	public static final double VISION_DISTANCE_DEADBAND_IN  = 3.0;
+	public static final double VISION_BEARING_DEADBAND_STEP = 0.5;
+	public static final double VISION_DISTANCE_DEADBAND_STEP = 0.5;
+	public static final double VISION_BEARING_DEADBAND_MIN  = 1.0;
+	public static final double VISION_BEARING_DEADBAND_MAX  = 15.0;
+	public static final double VISION_DISTANCE_DEADBAND_MIN   = 0.5;
+	public static final double VISION_DISTANCE_DEADBAND_MAX   = 12.0;
+	// Hysteresis: start correcting above deadband+start, stop below deadband-stop
+	public static final double VISION_BEARING_HYSTERESIS_START_OFFSET  = 1.0;
+	public static final double VISION_BEARING_HYSTERESIS_STOP_OFFSET   = 2.0;
+	public static final double VISION_DISTANCE_HYSTERESIS_START_OFFSET = 0.5;
+	public static final double VISION_DISTANCE_HYSTERESIS_STOP_OFFSET  = 1.0;
 }

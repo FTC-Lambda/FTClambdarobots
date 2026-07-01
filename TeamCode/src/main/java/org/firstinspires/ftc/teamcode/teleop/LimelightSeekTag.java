@@ -10,6 +10,8 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.teamcode.hardware.RobotHardware;
 import org.firstinspires.ftc.teamcode.subsystems.Drivetrain;
+import org.firstinspires.ftc.teamcode.util.Constants;
+import org.firstinspires.ftc.teamcode.util.VisionDeadband;
 
 import java.util.List;
 
@@ -21,6 +23,9 @@ import java.util.List;
  *   - D-pad left / right: change the target AprilTag ID (20, 21, 22, 23, 24) — MANUAL only.
  *   - D-pad up / down: raise / lower the follow standoff distance (any time).
  *   - Right / left bumper: raise / lower the spin (turn) power (any time).
+ *   - X / Y: raise / lower bearing deadband (any time).
+ *   - Left / right trigger: lower / raise distance deadband (any time).
+ *   - Start: reset deadbands to Constants defaults.
  *   - A: start FOLLOW — continuously track the SELECTED tag: turn to keep it centered while
  *        holding the standoff distance, so it keeps following as the tag moves (drives up if
  *        too far, backs off if too close). If the tag goes out of view it spins to reacquire.
@@ -44,9 +49,7 @@ public class LimelightSeekTag extends LinearOpMode {
 	// --- Auto tuning ---
 	static final double TURN_GAIN         = 0.03; // turn power per degree of bearing error
 	static final double TURN_MIN_POWER    = 0.2;  // feedforward: smallest turn that spins ALL wheels
-	static final double AIM_LEEWAY_DEG    = 4.0;  // deg — inside this, hold still (no turning at all)
 	static final double AIM_FALLOFF_DEG   = 30.0; // deg — forward drive fades to 0 by this bearing
-	static final double BEARING_THRESHOLD = 5.0;  // deg — "centered" indicator only
 	static final double MAX_DRIVE         = 0.5;  // cap on forward/back power
 	static final double DRIVE_GAIN        = 0.03; // drive power per inch of distance error
 
@@ -66,7 +69,6 @@ public class LimelightSeekTag extends LinearOpMode {
 	static final double STANDOFF_STEP_IN    = 2.0;  // D-pad up/down increment
 	static final double STANDOFF_MIN_IN     = 6.0;
 	static final double STANDOFF_MAX_IN     = 120.0;
-	static final double DISTANCE_TOLERANCE_IN = 2.0; // deadband so it doesn't jitter at the setpoint
 
 	private enum Mode { MANUAL, FOLLOW }
 
@@ -88,9 +90,13 @@ public class LimelightSeekTag extends LinearOpMode {
 		int choiceIndex = 0;                 // index into TAG_CHOICES
 		double standoffIn = DEFAULT_STANDOFF_IN;
 		double spinPower = SPIN_POWER_DEFAULT;
+		VisionDeadband deadband = new VisionDeadband();
 		boolean prevDpadLeft = false, prevDpadRight = false;
 		boolean prevDpadUp = false, prevDpadDown = false;
 		boolean prevRB = false, prevLB = false;
+		boolean prevX = false, prevY = false;
+		boolean prevLT = false, prevRT = false;
+		boolean prevStart = false;
 
 		// Predictive-tracking state (tag motion estimated between frames).
 		ElapsedTime rateTimer = new ElapsedTime();
@@ -102,8 +108,10 @@ public class LimelightSeekTag extends LinearOpMode {
 			// --- Buttons ---
 			if (gamepad1.b) {
 				mode = Mode.MANUAL;
+				deadband.clearState();
 			} else if (gamepad1.a && mode == Mode.MANUAL) {
 				mode = Mode.FOLLOW;
+				deadband.clearState();
 			}
 
 			// Change target tag with D-pad (rising edge), MANUAL only.
@@ -138,6 +146,33 @@ public class LimelightSeekTag extends LinearOpMode {
 			prevRB = gamepad1.right_bumper;
 			prevLB = gamepad1.left_bumper;
 
+			// Bearing deadband: X up, Y down (rising edge).
+			if (gamepad1.x && !prevX) {
+				deadband.nudgeBearingDeadband(Constants.VISION_BEARING_DEADBAND_STEP);
+			}
+			if (gamepad1.y && !prevY) {
+				deadband.nudgeBearingDeadband(-Constants.VISION_BEARING_DEADBAND_STEP);
+			}
+			prevX = gamepad1.x;
+			prevY = gamepad1.y;
+
+			// Distance deadband: right trigger up, left trigger down (rising edge past 50%).
+			boolean lt = gamepad1.left_trigger > 0.5;
+			boolean rt = gamepad1.right_trigger > 0.5;
+			if (rt && !prevRT) {
+				deadband.nudgeDistanceDeadband(Constants.VISION_DISTANCE_DEADBAND_STEP);
+			}
+			if (lt && !prevLT) {
+				deadband.nudgeDistanceDeadband(-Constants.VISION_DISTANCE_DEADBAND_STEP);
+			}
+			prevLT = lt;
+			prevRT = rt;
+
+			if (gamepad1.start && !prevStart) {
+				deadband.resetToDefaults();
+			}
+			prevStart = gamepad1.start;
+
 			int targetTagId = TAG_CHOICES[choiceIndex];
 
 			// --- Read tags once ---
@@ -168,11 +203,8 @@ public class LimelightSeekTag extends LinearOpMode {
 						hasPrev = true;
 						rateTimer.reset();
 
-						// Leeway deadband: if the tag is within a few degrees of center, hold still
-						// (no proportional, no velocity lead, no min-power) so sensor noise doesn't
-						// cause the robot to jitter back and forth. Only correct once the tag is
-						// clearly off-center; then add a velocity lead and the stiction feedforward.
-						if (Math.abs(bearing) > AIM_LEEWAY_DEG) {
+						// Hysteresis deadband: hold turn still inside the band to avoid jitter.
+						if (deadband.shouldCorrectTurn(bearing)) {
 							double turnCmd = bearing * TURN_GAIN + bearingRate * TURN_VEL_GAIN;
 							turnPower = clamp(turnCmd, -spinPower, spinPower);
 							if (Math.abs(turnPower) < TURN_MIN_POWER) {
@@ -180,13 +212,11 @@ public class LimelightSeekTag extends LinearOpMode {
 							}
 						}
 
-						// Hold the standoff distance, with a range-velocity lead so it keeps pace
-						// as the tag moves toward/away. Drive and turn together (arc), fading forward
-						// power as the tag gets further off-center so it aims more and lunges less.
+						// Hold standoff; only drive when outside distance deadband.
 						double distError = range - standoffIn; // + = too far
 						double aimFactor = clamp(1.0 - Math.abs(bearing) / AIM_FALLOFF_DEG, 0.0, 1.0);
 						double driveCmd;
-						if (Math.abs(distError) <= DISTANCE_TOLERANCE_IN) {
+						if (!deadband.shouldCorrectDrive(distError)) {
 							driveCmd = rangeRate * DRIVE_VEL_GAIN; // at setpoint: just track motion
 							action = String.format("FOLLOW holding %.0f in (tag %d)", standoffIn, targetTagId);
 						} else {
@@ -207,6 +237,7 @@ public class LimelightSeekTag extends LinearOpMode {
 				case MANUAL:
 				default:
 					hasPrev = false; // start FOLLOW with a fresh velocity estimate
+					deadband.clearState();
 					action = "MANUAL";
 					break;
 			}
@@ -234,6 +265,9 @@ public class LimelightSeekTag extends LinearOpMode {
 			telemetry.addData("Target tag (D-pad L/R)", targetTagId);
 			telemetry.addData("Standoff (D-pad U/D)", "%.0f in", standoffIn);
 			telemetry.addData("Spin power (bumpers)", "%.2f", spinPower);
+			telemetry.addData("Bearing deadband (X/Y)", "%.1f deg", deadband.getBearingDeadbandDeg());
+			telemetry.addData("Distance deadband (LT/RT)", "%.1f in", deadband.getDistanceDeadbandIn());
+			telemetry.addLine("Start = reset deadbands to defaults");
 			if (target != null) {
 				double dist = rangeInches(target);
 				telemetry.addData("2) Target tag", "IN VIEW");
@@ -251,7 +285,7 @@ public class LimelightSeekTag extends LinearOpMode {
 			telemetry.addData("Action", action);
 			telemetry.addData("Target visible?", target != null ? "YES" : "no");
 			telemetry.addData("Centered?", target != null
-					? (Math.abs(target.getTargetXDegrees()) <= BEARING_THRESHOLD ? "YES" : "no") : "--");
+					? (deadband.isBearingCentered(target.getTargetXDegrees()) ? "YES" : "no") : "--");
 			telemetry.addData("Tag speed (deg/s, in/s)", "%.0f / %.0f", bearingRate, rangeRate);
 			telemetry.addData("Cmd drive / turn", "%.2f / %.2f", drivePower, turnPower);
 			telemetry.update();

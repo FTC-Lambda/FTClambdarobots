@@ -11,6 +11,7 @@ import org.firstinspires.ftc.robotcore.external.navigation.Position;
 import org.firstinspires.ftc.teamcode.hardware.LimelightPipelines;
 import org.firstinspires.ftc.teamcode.hardware.RobotHardware;
 import org.firstinspires.ftc.teamcode.subsystems.Drivetrain;
+import org.firstinspires.ftc.teamcode.util.VisionDeadband;
 
 import java.util.List;
 
@@ -30,13 +31,12 @@ public class AprilTagSeekAuto extends LinearOpMode {
 	static final double FIDUCIAL_SIZE_MM = 165.1;
 
 	// --- Tunable constants ---
-	static final double SPIN_POWER         = 0.3;   // raw turn power during spin
+	static final double SPIN_POWER         = 0.3;   // raw turn power during spin / search
 	static final long   SPIN_TIMEOUT_MS    = 3000;  // give up if no tag found in this window
-	static final double BEARING_THRESHOLD  = 5.0;   // degrees — "centered enough"
 	static final long   CENTER_TIMEOUT_MS  = 2000;  // give up centering if tag lost
 	static final double DESIRED_DISTANCE   = 12.0;  // inches — stop distance
 	static final double SPEED_GAIN         = 0.02;  // forward proportional gain
-	static final double TURN_GAIN          = 0.01;  // turn proportional gain
+	static final double TURN_GAIN          = 0.02;  // turn proportional gain (center + approach)
 	static final double MAX_DRIVE_SPEED    = 0.4;   // cap on forward power
 	static final double MAX_TURN_SPEED     = 0.3;   // cap on turn correction power
 
@@ -44,12 +44,14 @@ public class AprilTagSeekAuto extends LinearOpMode {
 
 	private RobotHardware robot;
 	private Drivetrain drivetrain;
+	private VisionDeadband deadband;
 
 	@Override
 	public void runOpMode() {
 		robot = new RobotHardware();
 		robot.init(hardwareMap);
 		drivetrain = new Drivetrain(robot);
+		deadband = new VisionDeadband();
 
 		robot.limelight.pipelineSwitch(PIPELINE_APRILTAG);
 		robot.limelight.setPollRateHz(100); // ask the Limelight for data 100x/sec
@@ -123,14 +125,16 @@ public class AprilTagSeekAuto extends LinearOpMode {
 
 			if (locked != null) {
 				double bearing = locked.getTargetXDegrees();
-				if (Math.abs(bearing) <= BEARING_THRESHOLD) {
+				if (deadband.isBearingCentered(bearing)) {
 					drivetrain.driveRaw(0, 0, 0);
 					phase = Phase.APPROACH;
 					timer.reset();
-				} else {
-					// keep spinning in the same direction, proportional nudge
-					double turnPower = Math.signum(bearing) * SPIN_POWER;
+					deadband.clearState();
+				} else if (deadband.shouldCorrectTurn(bearing)) {
+					double turnPower = clamp(bearing * TURN_GAIN, -SPIN_POWER, SPIN_POWER);
 					drivetrain.driveRaw(0, 0, turnPower);
+				} else {
+					drivetrain.driveRaw(0, 0, 0);
 				}
 				telemetry.addData("CENTER bearing", "%.1f deg", bearing);
 			} else {
@@ -162,8 +166,15 @@ public class AprilTagSeekAuto extends LinearOpMode {
 					phase = Phase.DONE;
 					telemetry.addData("APPROACH", "Reached target at %.1f in", rangeIn);
 				} else {
-					double drive = Math.min((rangeIn - DESIRED_DISTANCE) * SPEED_GAIN, MAX_DRIVE_SPEED);
-					double turn  = Math.max(-MAX_TURN_SPEED, Math.min(MAX_TURN_SPEED, bearing * TURN_GAIN));
+					double distError = rangeIn - DESIRED_DISTANCE;
+					double drive = 0.0;
+					double turn = 0.0;
+					if (deadband.shouldCorrectDrive(distError)) {
+						drive = Math.min(distError * SPEED_GAIN, MAX_DRIVE_SPEED);
+					}
+					if (deadband.shouldCorrectTurn(bearing)) {
+						turn = clamp(bearing * TURN_GAIN, -MAX_TURN_SPEED, MAX_TURN_SPEED);
+					}
 					drivetrain.driveRaw(drive, 0, turn);
 					telemetry.addData("APPROACH range", "%.1f in", rangeIn);
 					telemetry.addData("APPROACH bearing", "%.1f deg", bearing);
@@ -196,5 +207,9 @@ public class AprilTagSeekAuto extends LinearOpMode {
 	private double rangeInches(LLResultTypes.FiducialResult f) {
 		Position p = f.getTargetPoseCameraSpace().getPosition().toUnit(DistanceUnit.INCH);
 		return p.z;
+	}
+
+	private static double clamp(double v, double lo, double hi) {
+		return Math.max(lo, Math.min(hi, v));
 	}
 }
