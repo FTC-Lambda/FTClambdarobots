@@ -41,7 +41,7 @@ public class Drivetrain {
 		//Control orientation
 		double adjustedY = -y;
 		//Strafing
-		double adjustedX = -x;
+		double adjustedX = x;
 		//Rotation
 		double adjustedRx = rx;
 
