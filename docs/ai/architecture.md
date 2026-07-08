@@ -44,7 +44,3 @@ References:
 - `docs/superpowers/specs/2026-06-24-apriltag-seek-auto-design.md` — AprilTag autonomous design (migrated content should be condensed here)
 - `docs/superpowers/plans/2026-06-24-apriltag-seek-auto.md` — implementation plan (use for developer tasks)
 
-TODOs:
-- Add short diagram or Mermaid flow (optional).
-- Confirm any other vision consumers and list them here.
-

@@ -1,5 +1,8 @@
 AI Hardware Notes
 
+> **This document reflects the current codebase, not necessarily the physical robot.**
+> If hardware changes on the robot before the code is updated, `RobotHardware.java` remains the software source of truth until synchronized.
+
 Authoritative source: `TeamCode/src/main/java/org/firstinspires.ftc.teamcode/hardware/RobotHardware.java`.
 
 - **Hardware map (from `RobotHardware.java`):**
