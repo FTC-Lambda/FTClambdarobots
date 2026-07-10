@@ -23,17 +23,20 @@ import java.util.List;
  *   - D-pad left / right: change the target AprilTag ID (20, 21, 22, 23, 24) — MANUAL only.
  *   - D-pad up / down: raise / lower the follow standoff distance (any time).
  *   - Right / left bumper: raise / lower the spin (turn) power (any time).
- *   - X / Y: raise / lower bearing deadband (any time).
+ *   - X / Y: raise / lower the turn dead-zone (any time).
  *   - Left / right trigger: lower / raise distance deadband (any time).
- *   - Start: reset deadbands to Constants defaults.
+ *   - Start: reset deadbands/dead-zone to Constants defaults.
  *   - A: start FOLLOW — continuously track the SELECTED tag: turn to keep it centered while
  *        holding the standoff distance, so it keeps following as the tag moves (drives up if
  *        too far, backs off if too close). If the tag goes out of view it spins to reacquire.
  *   - B: stop / return to MANUAL at any time.
  *
- * PREDICTIVE TRACKING: it estimates the tag's angular speed (deg/s) and range speed (in/s)
- * from frame to frame and adds a velocity feedforward, so it leads a moving tag instead of
- * always lagging behind it. Faster-moving tags get a proportionally bigger lead.
+ * TURN CONTROL: a continuous PD loop on bearing error (no on/off hysteresis, no hard power
+ * floor) — TURN_KP drives toward the target, TURN_KD damps the approach using the tag's
+ * smoothed angular velocity so the turn tapers to zero instead of overshooting past center.
+ * A small feedforward (TURN_KS) is added on top to overcome wheel static friction without
+ * breaking the continuity of the command. DRIVE (forward/back) still uses a velocity
+ * feedforward the same way — it leads a moving tag instead of always lagging behind it.
  *
  * Pipeline 0 must be a fiducial pipeline with the 3D solve enabled (run "Limelight
  * Pipeline Setup" if distance reads 0 or the pipeline shows as color).
@@ -47,8 +50,30 @@ public class LimelightSeekTag extends LinearOpMode {
 	static final int[] TAG_CHOICES = {20, 21, 22, 23, 24};
 
 	// --- Auto tuning ---
-	static final double TURN_GAIN         = 0.03; // turn power per degree of bearing error
-	static final double TURN_MIN_POWER    = 0.2;  // feedforward: smallest turn that spins ALL wheels
+	// Turn control is a PD loop on bearing error: turnCmd = bearing*TURN_KP + bearingRate*TURN_KD.
+	// bearingRate is the already-smoothed d(bearing)/dt, so TURN_KD is a genuine damping term
+	// (it opposes the P term as the error closes), not just a "lead" feedforward.
+	static final double TURN_KP           = 0.03;  // power per degree of bearing error
+	// Damping term, conservative starting value: at TURN_KP=0.03 a 5 deg error alone
+	// contributes 0.15 power, so TURN_KD is kept well below the point where a moderate
+	// closing rate (~10 deg/s) could swamp or reverse the P term. Field-tune upward
+	// carefully if the approach still overshoots.
+	static final double TURN_KD           = 0.02;  // power per (deg/s) of bearing closing rate — damping
+	// Static-friction feedforward: ADDED to the PD output (never replaces it), so the total
+	// command stays continuous instead of jumping to a fixed floor. Ramped in linearly over
+	// TURN_KS_RAMP_DEG past the dead-zone edge (see below) rather than snapping straight to
+	// full strength, which would itself be a smaller version of the same discontinuity this
+	// whole rework is trying to eliminate.
+	static final double TURN_KS           = 0.10;
+	static final double TURN_KS_RAMP_DEG  = 2.0;
+	// True dead-zone: below this, treat bearing noise as centered and command zero. This
+	// replaces the old wide on/off hysteresis band — a tight epsilon plus a continuous PD
+	// taper avoids the earlier discontinuity (which caused the robot to overshoot past
+	// center and oscillate) while still stopping noise-driven buzzing at dead center.
+	static final double TURN_EPSILON_DEG  = 1.0;
+	static final double TURN_EPSILON_STEP = 0.25; // X/Y adjustment step
+	static final double TURN_EPSILON_MIN  = 0.25;
+	static final double TURN_EPSILON_MAX  = 5.0;
 	static final double AIM_FALLOFF_DEG   = 30.0; // deg — forward drive fades to 0 by this bearing
 	static final double MAX_DRIVE         = 0.5;  // cap on forward/back power
 	static final double DRIVE_GAIN        = 0.03; // drive power per inch of distance error
@@ -59,8 +84,15 @@ public class LimelightSeekTag extends LinearOpMode {
 	static final double SPIN_MIN           = 0.1;
 	static final double SPIN_MAX           = 1.0;
 
-	// --- Predictive tracking (velocity feedforward) ---
-	static final double TURN_VEL_GAIN  = 0.010; // turn power per (deg/s) of tag angular speed
+	// How long the tag must be missing before switching to a full-speed search spin. A
+	// single missed frame is routine (motion blur, momentary occlusion) and should not
+	// interrupt tracking. Time-based rather than frame-counted since the OpMode loop rate
+	// and the Limelight's poll rate aren't guaranteed to be in lockstep.
+	static final double LOST_DEBOUNCE_MS = 150.0;
+
+	// --- Predictive tracking (velocity feedforward for the drive/standoff axis) ---
+	// Turn's velocity term is TURN_KD above (it does double duty as PD damping); this one is
+	// drive-only.
 	static final double DRIVE_VEL_GAIN = 0.020; // drive power per (in/s) of tag range speed
 	static final double RATE_SMOOTHING = 0.4;   // 0..1 low-pass on the velocity estimates (higher = snappier)
 
@@ -90,6 +122,7 @@ public class LimelightSeekTag extends LinearOpMode {
 		int choiceIndex = 0;                 // index into TAG_CHOICES
 		double standoffIn = DEFAULT_STANDOFF_IN;
 		double spinPower = SPIN_POWER_DEFAULT;
+		double turnEpsilonDeg = TURN_EPSILON_DEG;
 		VisionDeadband deadband = new VisionDeadband();
 		boolean prevDpadLeft = false, prevDpadRight = false;
 		boolean prevDpadUp = false, prevDpadDown = false;
@@ -104,6 +137,10 @@ public class LimelightSeekTag extends LinearOpMode {
 		double prevBearing = 0.0, prevRange = 0.0;
 		double bearingRate = 0.0, rangeRate = 0.0; // smoothed deg/s and in/s
 
+		// Debounce for treating the tag as lost (see LOST_DEBOUNCE_MS). Reset any time the
+		// tag is seen or FOLLOW is (re)entered; left running while the tag is missing.
+		ElapsedTime timeSinceSeen = new ElapsedTime();
+
 		while (opModeIsActive()) {
 			// --- Buttons ---
 			if (gamepad1.b) {
@@ -112,6 +149,7 @@ public class LimelightSeekTag extends LinearOpMode {
 			} else if (gamepad1.a && mode == Mode.MANUAL) {
 				mode = Mode.FOLLOW;
 				deadband.clearState();
+				timeSinceSeen.reset();
 			}
 
 			// Change target tag with D-pad (rising edge), MANUAL only.
@@ -146,12 +184,12 @@ public class LimelightSeekTag extends LinearOpMode {
 			prevRB = gamepad1.right_bumper;
 			prevLB = gamepad1.left_bumper;
 
-			// Bearing deadband: X up, Y down (rising edge).
+			// Turn dead-zone (epsilon): X up, Y down (rising edge).
 			if (gamepad1.x && !prevX) {
-				deadband.nudgeBearingDeadband(Constants.VISION_BEARING_DEADBAND_STEP);
+				turnEpsilonDeg = Math.min(TURN_EPSILON_MAX, turnEpsilonDeg + TURN_EPSILON_STEP);
 			}
 			if (gamepad1.y && !prevY) {
-				deadband.nudgeBearingDeadband(-Constants.VISION_BEARING_DEADBAND_STEP);
+				turnEpsilonDeg = Math.max(TURN_EPSILON_MIN, turnEpsilonDeg - TURN_EPSILON_STEP);
 			}
 			prevX = gamepad1.x;
 			prevY = gamepad1.y;
@@ -170,6 +208,7 @@ public class LimelightSeekTag extends LinearOpMode {
 
 			if (gamepad1.start && !prevStart) {
 				deadband.resetToDefaults();
+				turnEpsilonDeg = TURN_EPSILON_DEG;
 			}
 			prevStart = gamepad1.start;
 
@@ -187,6 +226,7 @@ public class LimelightSeekTag extends LinearOpMode {
 			switch (mode) {
 				case FOLLOW:
 					if (target != null) {
+						timeSinceSeen.reset();
 						double bearing = target.getTargetXDegrees();
 						double range = rangeInches(target);
 
@@ -203,13 +243,25 @@ public class LimelightSeekTag extends LinearOpMode {
 						hasPrev = true;
 						rateTimer.reset();
 
-						// Hysteresis deadband: hold turn still inside the band to avoid jitter.
-						if (deadband.shouldCorrectTurn(bearing)) {
-							double turnCmd = bearing * TURN_GAIN + bearingRate * TURN_VEL_GAIN;
+						// PD control on bearing error, continuous all the way to the setpoint — no
+						// on/off hysteresis gate and no hard floor override (both of those created
+						// power discontinuities that reliably swung the robot past center and back,
+						// which is what caused the sustained left/right jitter). TURN_KD is the
+						// damping term: as the error closes, bearingRate (already low-pass filtered)
+						// naturally opposes the P term and tapers the command toward zero.
+						if (Math.abs(bearing) > turnEpsilonDeg) {
+							double turnCmd = bearing * TURN_KP + bearingRate * TURN_KD;
+							turnCmd = clamp(turnCmd, -spinPower, spinPower);
+							// Static-friction feedforward: ADDED on top of the PD output (not a
+							// floor that replaces it), so the command stays continuous. Ramped in
+							// linearly over TURN_KS_RAMP_DEG past the dead-zone edge instead of
+							// snapping straight to full strength right at turnEpsilonDeg — a hard
+							// 0-to-TURN_KS jump at that boundary would itself be a smaller copy of
+							// the discontinuity that caused the original jitter.
+							double rampScale = clamp(
+									(Math.abs(bearing) - turnEpsilonDeg) / TURN_KS_RAMP_DEG, 0.0, 1.0);
+							turnCmd += Math.copySign(Math.min(TURN_KS, spinPower) * rampScale, bearing);
 							turnPower = clamp(turnCmd, -spinPower, spinPower);
-							if (Math.abs(turnPower) < TURN_MIN_POWER) {
-								turnPower = Math.copySign(TURN_MIN_POWER, bearing);
-							}
 						}
 
 						// Hold standoff; only drive when outside distance deadband.
@@ -225,11 +277,24 @@ public class LimelightSeekTag extends LinearOpMode {
 									distError > 0 ? "approaching" : "backing off", targetTagId);
 						}
 						drivePower = clamp(driveCmd, -MAX_DRIVE, MAX_DRIVE) * aimFactor;
+					} else if (timeSinceSeen.milliseconds() < LOST_DEBOUNCE_MS) {
+						// Momentarily missing (motion blur, momentary occlusion) — sit still rather
+						// than immediately slamming into a full-speed search spin, which tends to
+						// overshoot right past the tag. turnPower/drivePower stay at their 0.0
+						// defaults for this iteration. Velocity feedforward (bearingRate/rangeRate)
+						// is deliberately left alone here since the tag may reappear next frame and
+						// the estimate is still fresh.
+						action = String.format("FOLLOW coasting (%.0f ms since seen)", timeSinceSeen.milliseconds());
 					} else {
-						// Lost the tag — spin to reacquire it (keeps following once it reappears).
+						// Genuinely lost the tag — spin to reacquire it (keeps following once it
+						// reappears). Clear both the frame-to-frame link AND the smoothed velocity
+						// estimate so reacquisition starts from a clean state instead of applying a
+						// stale feedforward left over from before the tag went missing.
 						turnPower = spinPower;
 						drivePower = 0.0;
-						hasPrev = false; // don't carry a stale velocity across the gap
+						hasPrev = false;
+						bearingRate = 0.0;
+						rangeRate = 0.0;
 						action = "FOLLOW searching for tag " + targetTagId;
 					}
 					break;
@@ -237,6 +302,8 @@ public class LimelightSeekTag extends LinearOpMode {
 				case MANUAL:
 				default:
 					hasPrev = false; // start FOLLOW with a fresh velocity estimate
+					bearingRate = 0.0;
+					rangeRate = 0.0;
 					deadband.clearState();
 					action = "MANUAL";
 					break;
@@ -265,7 +332,7 @@ public class LimelightSeekTag extends LinearOpMode {
 			telemetry.addData("Target tag (D-pad L/R)", targetTagId);
 			telemetry.addData("Standoff (D-pad U/D)", "%.0f in", standoffIn);
 			telemetry.addData("Spin power (bumpers)", "%.2f", spinPower);
-			telemetry.addData("Bearing deadband (X/Y)", "%.1f deg", deadband.getBearingDeadbandDeg());
+			telemetry.addData("Turn dead-zone (X/Y)", "%.2f deg", turnEpsilonDeg);
 			telemetry.addData("Distance deadband (LT/RT)", "%.1f in", deadband.getDistanceDeadbandIn());
 			telemetry.addLine("Start = reset deadbands to defaults");
 			if (target != null) {
@@ -285,7 +352,7 @@ public class LimelightSeekTag extends LinearOpMode {
 			telemetry.addData("Action", action);
 			telemetry.addData("Target visible?", target != null ? "YES" : "no");
 			telemetry.addData("Centered?", target != null
-					? (deadband.isBearingCentered(target.getTargetXDegrees()) ? "YES" : "no") : "--");
+					? (Math.abs(target.getTargetXDegrees()) <= turnEpsilonDeg ? "YES" : "no") : "--");
 			telemetry.addData("Tag speed (deg/s, in/s)", "%.0f / %.0f", bearingRate, rangeRate);
 			telemetry.addData("Cmd drive / turn", "%.2f / %.2f", drivePower, turnPower);
 			telemetry.update();
