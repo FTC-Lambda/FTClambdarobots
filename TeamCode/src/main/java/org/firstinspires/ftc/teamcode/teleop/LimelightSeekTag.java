@@ -11,6 +11,8 @@ import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.teamcode.hardware.RobotHardware;
 import org.firstinspires.ftc.teamcode.subsystems.Drivetrain;
 import org.firstinspires.ftc.teamcode.util.Constants;
+import org.firstinspires.ftc.teamcode.util.PIDController;
+import org.firstinspires.ftc.teamcode.util.SlewRateLimiter;
 import org.firstinspires.ftc.teamcode.util.VisionDeadband;
 
 import java.util.List;
@@ -31,9 +33,12 @@ import java.util.List;
  *        too far, backs off if too close). If the tag goes out of view it spins to reacquire.
  *   - B: stop / return to MANUAL at any time.
  *
- * PREDICTIVE TRACKING: it estimates the tag's angular speed (deg/s) and range speed (in/s)
- * from frame to frame and adds a velocity feedforward, so it leads a moving tag instead of
- * always lagging behind it. Faster-moving tags get a proportionally bigger lead.
+ * TRACKING: bearing and range are each closed-loop PID (see util.PIDController) rather than
+ * plain proportional control — the D term is computed from the raw measurement (not the
+ * error), so it acts as a filtered velocity feedforward that leads a moving tag, and the I
+ * term corrects small persistent offsets (e.g. camera mounting bias) that pure P leaves
+ * uncorrected. Final drive/turn power is slew-rate limited (util.SlewRateLimiter) so
+ * corrections ramp in smoothly instead of snapping.
  *
  * Pipeline 0 must be a fiducial pipeline with the 3D solve enabled (run "Limelight
  * Pipeline Setup" if distance reads 0 or the pipeline shows as color).
@@ -47,22 +52,15 @@ public class LimelightSeekTag extends LinearOpMode {
 	static final int[] TAG_CHOICES = {20, 21, 22, 23, 24};
 
 	// --- Auto tuning ---
-	static final double TURN_GAIN         = 0.03; // turn power per degree of bearing error
 	static final double TURN_MIN_POWER    = 0.2;  // feedforward: smallest turn that spins ALL wheels
 	static final double AIM_FALLOFF_DEG   = 30.0; // deg — forward drive fades to 0 by this bearing
 	static final double MAX_DRIVE         = 0.5;  // cap on forward/back power
-	static final double DRIVE_GAIN        = 0.03; // drive power per inch of distance error
 
 	// --- Adjustable spin (turn) power ---
 	static final double SPIN_POWER_DEFAULT = 0.5; // caps proportional turn AND sets search speed
 	static final double SPIN_STEP          = 0.05;
 	static final double SPIN_MIN           = 0.1;
 	static final double SPIN_MAX           = 1.0;
-
-	// --- Predictive tracking (velocity feedforward) ---
-	static final double TURN_VEL_GAIN  = 0.010; // turn power per (deg/s) of tag angular speed
-	static final double DRIVE_VEL_GAIN = 0.020; // drive power per (in/s) of tag range speed
-	static final double RATE_SMOOTHING = 0.4;   // 0..1 low-pass on the velocity estimates (higher = snappier)
 
 	// --- Standoff distance (how far to hold from the tag) ---
 	static final double DEFAULT_STANDOFF_IN = 40.0; // starting standoff
@@ -98,20 +96,35 @@ public class LimelightSeekTag extends LinearOpMode {
 		boolean prevLT = false, prevRT = false;
 		boolean prevStart = false;
 
-		// Predictive-tracking state (tag motion estimated between frames).
-		ElapsedTime rateTimer = new ElapsedTime();
-		boolean hasPrev = false;
-		double prevBearing = 0.0, prevRange = 0.0;
-		double bearingRate = 0.0, rangeRate = 0.0; // smoothed deg/s and in/s
+		// Closed-loop tracking: PID per axis (P+I+D — D also serves as velocity feedforward
+		// on a moving tag), plus a slew limiter on the final commanded power for smoothness.
+		PIDController turnPid = new PIDController(
+				Constants.VISION_SEEK_TURN_KP, Constants.VISION_SEEK_TURN_KI, Constants.VISION_SEEK_TURN_KD,
+				Constants.VISION_SEEK_TURN_INTEGRAL_LIMIT, Constants.VISION_SEEK_TURN_INTEGRAL_ZONE_DEG,
+				Constants.VISION_TURN_DERIVATIVE_FILTER);
+		PIDController drivePid = new PIDController(
+				Constants.VISION_SEEK_DRIVE_KP, Constants.VISION_SEEK_DRIVE_KI, Constants.VISION_SEEK_DRIVE_KD,
+				Constants.VISION_SEEK_DRIVE_INTEGRAL_LIMIT, Constants.VISION_SEEK_DRIVE_INTEGRAL_ZONE_IN,
+				Constants.VISION_DRIVE_DERIVATIVE_FILTER);
+		SlewRateLimiter turnSlew = new SlewRateLimiter(Constants.VISION_TURN_SLEW_RATE);
+		SlewRateLimiter driveSlew = new SlewRateLimiter(Constants.VISION_DRIVE_SLEW_RATE);
+		ElapsedTime loopTimer = new ElapsedTime();
 
 		while (opModeIsActive()) {
+			double dt = loopTimer.seconds();
+			loopTimer.reset();
+
 			// --- Buttons ---
 			if (gamepad1.b) {
 				mode = Mode.MANUAL;
 				deadband.clearState();
+				turnPid.reset();
+				drivePid.reset();
 			} else if (gamepad1.a && mode == Mode.MANUAL) {
 				mode = Mode.FOLLOW;
 				deadband.clearState();
+				turnPid.reset();
+				drivePid.reset();
 			}
 
 			// Change target tag with D-pad (rising edge), MANUAL only.
@@ -190,23 +203,14 @@ public class LimelightSeekTag extends LinearOpMode {
 						double bearing = target.getTargetXDegrees();
 						double range = rangeInches(target);
 
-						// --- Estimate the tag's motion between frames (smoothed) ---
-						double dt = rateTimer.seconds();
-						if (hasPrev && dt > 1e-3) {
-							double rawBearingRate = (bearing - prevBearing) / dt; // deg/s
-							double rawRangeRate = (range - prevRange) / dt;       // in/s
-							bearingRate = RATE_SMOOTHING * rawBearingRate + (1 - RATE_SMOOTHING) * bearingRate;
-							rangeRate = RATE_SMOOTHING * rawRangeRate + (1 - RATE_SMOOTHING) * rangeRate;
-						}
-						prevBearing = bearing;
-						prevRange = range;
-						hasPrev = true;
-						rateTimer.reset();
+						// PID runs every frame regardless of the deadband so its integral/
+						// derivative state stays current; whether the output gets applied
+						// depends on the hysteresis deadband below.
+						double turnOut = turnPid.calculate(bearing, 0.0, dt);
 
 						// Hysteresis deadband: hold turn still inside the band to avoid jitter.
 						if (deadband.shouldCorrectTurn(bearing)) {
-							double turnCmd = bearing * TURN_GAIN + bearingRate * TURN_VEL_GAIN;
-							turnPower = clamp(turnCmd, -spinPower, spinPower);
+							turnPower = clamp(turnOut, -spinPower, spinPower);
 							if (Math.abs(turnPower) < TURN_MIN_POWER) {
 								turnPower = Math.copySign(TURN_MIN_POWER, bearing);
 							}
@@ -214,13 +218,14 @@ public class LimelightSeekTag extends LinearOpMode {
 
 						// Hold standoff; only drive when outside distance deadband.
 						double distError = range - standoffIn; // + = too far
+						double driveOut = drivePid.calculate(range, standoffIn, dt);
 						double aimFactor = clamp(1.0 - Math.abs(bearing) / AIM_FALLOFF_DEG, 0.0, 1.0);
 						double driveCmd;
 						if (!deadband.shouldCorrectDrive(distError)) {
-							driveCmd = rangeRate * DRIVE_VEL_GAIN; // at setpoint: just track motion
+							driveCmd = drivePid.getLastD(); // at setpoint: D term alone tracks tag motion
 							action = String.format("FOLLOW holding %.0f in (tag %d)", standoffIn, targetTagId);
 						} else {
-							driveCmd = distError * DRIVE_GAIN + rangeRate * DRIVE_VEL_GAIN;
+							driveCmd = driveOut;
 							action = String.format("FOLLOW %s (tag %d)",
 									distError > 0 ? "approaching" : "backing off", targetTagId);
 						}
@@ -229,24 +234,32 @@ public class LimelightSeekTag extends LinearOpMode {
 						// Lost the tag — spin to reacquire it (keeps following once it reappears).
 						turnPower = spinPower;
 						drivePower = 0.0;
-						hasPrev = false; // don't carry a stale velocity across the gap
+						turnPid.reset(); // don't carry stale state across the gap
+						drivePid.reset();
 						action = "FOLLOW searching for tag " + targetTagId;
 					}
 					break;
 
 				case MANUAL:
 				default:
-					hasPrev = false; // start FOLLOW with a fresh velocity estimate
+					turnPid.reset(); // so the next FOLLOW entry starts with fresh PID/velocity state
+					drivePid.reset();
 					deadband.clearState();
 					action = "MANUAL";
 					break;
 			}
 
-			// --- Apply drive ---
+			// --- Apply drive (slew-limited in FOLLOW so corrections ramp instead of snapping) ---
+			double smoothedDrive = drivePower;
+			double smoothedTurn = turnPower;
 			if (mode == Mode.MANUAL) {
 				drivetrain.drive(gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x);
+				turnSlew.reset();  // next FOLLOW entry ramps from the actual current power, not a stale one
+				driveSlew.reset();
 			} else {
-				drivetrain.driveRaw(drivePower, 0, turnPower);
+				smoothedDrive = driveSlew.calculate(drivePower, dt);
+				smoothedTurn = turnSlew.calculate(turnPower, dt);
+				drivetrain.driveRaw(smoothedDrive, 0, smoothedTurn);
 			}
 
 			// --- Status 1: connection + pipeline sanity ---
@@ -286,8 +299,12 @@ public class LimelightSeekTag extends LinearOpMode {
 			telemetry.addData("Target visible?", target != null ? "YES" : "no");
 			telemetry.addData("Centered?", target != null
 					? (deadband.isBearingCentered(target.getTargetXDegrees()) ? "YES" : "no") : "--");
-			telemetry.addData("Tag speed (deg/s, in/s)", "%.0f / %.0f", bearingRate, rangeRate);
-			telemetry.addData("Cmd drive / turn", "%.2f / %.2f", drivePower, turnPower);
+			telemetry.addData("Turn PID (P/I/D)", "%.2f / %.2f / %.2f",
+					turnPid.getLastP(), turnPid.getLastI(), turnPid.getLastD());
+			telemetry.addData("Drive PID (P/I/D)", "%.2f / %.2f / %.2f",
+					drivePid.getLastP(), drivePid.getLastI(), drivePid.getLastD());
+			telemetry.addData("Cmd drive / turn (raw)", "%.2f / %.2f", drivePower, turnPower);
+			telemetry.addData("Cmd drive / turn (smoothed)", "%.2f / %.2f", smoothedDrive, smoothedTurn);
 			telemetry.update();
 		}
 
