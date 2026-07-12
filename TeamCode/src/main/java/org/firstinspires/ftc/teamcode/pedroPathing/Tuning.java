@@ -416,7 +416,7 @@ class ForwardVelocityTuner extends OpMode {
                 end = true;
                 stopRobot();
             } else {
-                follower.setTeleOpDrive(1,0,0,true);
+                follower.setTeleOpDrive(1,0,0,false); // Robot-centric: không bị heading ảnh hưởng
                 //double currentVelocity = Math.abs(follower.getVelocity().getXComponent());
                 double currentVelocity = Math.abs(follower.poseTracker.getLocalizer().getVelocity().getX());
                 velocities.add(currentVelocity);
@@ -524,7 +524,7 @@ class LateralVelocityTuner extends OpMode {
                 end = true;
                 stopRobot();
             } else {
-                follower.setTeleOpDrive(0,1,0,true);
+                follower.setTeleOpDrive(0,1,0,false); // Robot-centric: chắc chắn chạy ngang
                 double currentVelocity = Math.abs(follower.getVelocity().dot(new Vector(1, Math.PI / 2)));
                 velocities.add(currentVelocity);
                 velocities.remove(0);
@@ -599,7 +599,7 @@ class ForwardZeroPowerAccelerationTuner extends OpMode {
     public void start() {
         follower.startTeleopDrive(false);
         follower.update();
-        follower.setTeleOpDrive(1,0,0,true);
+        follower.setTeleOpDrive(0.6, 0, 0, true); // Giảm từ 1 xuống 0.6 để chống trượt bánh khi bắt đầu
     }
 
     /**
@@ -703,7 +703,7 @@ class LateralZeroPowerAccelerationTuner extends OpMode {
     public void start() {
         follower.startTeleopDrive(false);
         follower.update();
-        follower.setTeleOpDrive(0,1,0,true);
+        follower.setTeleOpDrive(0, 0.6, 0, true); // Giảm từ 1 xuống 0.6 để chống trượt bánh ngang
     }
 
     /**
