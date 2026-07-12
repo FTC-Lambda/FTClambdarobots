@@ -50,36 +50,22 @@ public class Drivetrain {
 		adjustedX = Math.signum(adjustedX) * Math.pow(adjustedX, 2) * Constants.DRIVE_SPEED;
 		adjustedRx = Math.signum(adjustedRx) * Math.pow(adjustedRx, 2) * Constants.DRIVE_SPEED;
 
-		//Drivetrain equation that incorporates both strafing and rotations into the wheels
-		double frontLeft  = adjustedY + adjustedX + adjustedRx;
-		double backLeftP  = adjustedY - adjustedX + adjustedRx;
-		double frontRight = adjustedY - adjustedX - adjustedRx;
-		double backRightP = adjustedY + adjustedX - adjustedRx;
-
-		// Normalize against raw (unscaled) values so the calibration scales are not
-		// counteracted by the normalization denominator.
-		double max = Math.max(Math.abs(frontLeft), Math.max(Math.abs(backLeftP),
-				Math.max(Math.abs(frontRight), Math.abs(backRightP))));
-		if (max > 1.0) {
-			frontLeft  /= max;
-			backLeftP  /= max;
-			frontRight /= max;
-			backRightP /= max;
-		}
-
-		// Apply per-motor calibration scales after normalization, clamping to [-1, 1].
-		robot.topLeft.setPower(clampPower(frontLeft  * motorScales[MOTOR_TOP_LEFT]));
-		robot.backLeft.setPower(clampPower(backLeftP  * motorScales[MOTOR_BACK_LEFT]));
-		robot.topRight.setPower(clampPower(frontRight * motorScales[MOTOR_TOP_RIGHT]));
-		robot.backRight.setPower(clampPower(backRightP * motorScales[MOTOR_BACK_RIGHT]));
+		driveMecanum(adjustedY, adjustedX, adjustedRx);
 	}
 
 	public void driveRaw(double y, double x, double rx) {
+		driveMecanum(y, x, rx);
+	}
+
+	private void driveMecanum(double y, double x, double rx) {
+		//Drivetrain equation that incorporates both strafing and rotations into the wheels
 		double frontLeft  =  y + x + rx;
 		double backLeft   =  y - x + rx;
 		double frontRight =  y - x - rx;
 		double backRight  =  y + x - rx;
 
+		// Normalize against raw (unscaled) values so the calibration scales are not
+		// counteracted by the normalization denominator.
 		double max = Math.max(Math.abs(frontLeft), Math.max(Math.abs(backLeft),
 				Math.max(Math.abs(frontRight), Math.abs(backRight))));
 		if (max > 1.0) {
@@ -89,6 +75,7 @@ public class Drivetrain {
 			backRight  /= max;
 		}
 
+		// Apply per-motor calibration scales after normalization, clamping to [-1, 1].
 		robot.topLeft.setPower(clampPower(frontLeft  * motorScales[MOTOR_TOP_LEFT]));
 		robot.backLeft.setPower(clampPower(backLeft   * motorScales[MOTOR_BACK_LEFT]));
 		robot.topRight.setPower(clampPower(frontRight * motorScales[MOTOR_TOP_RIGHT]));

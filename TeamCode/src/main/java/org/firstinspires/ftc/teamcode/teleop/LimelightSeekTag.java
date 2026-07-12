@@ -125,6 +125,8 @@ public class LimelightSeekTag extends LinearOpMode {
 				deadband.clearState();
 				turnPid.reset();
 				drivePid.reset();
+				turnSlew.reset();
+				driveSlew.reset();
 			}
 
 			// Change target tag with D-pad (rising edge), MANUAL only.
@@ -242,9 +244,6 @@ public class LimelightSeekTag extends LinearOpMode {
 
 				case MANUAL:
 				default:
-					turnPid.reset(); // so the next FOLLOW entry starts with fresh PID/velocity state
-					drivePid.reset();
-					deadband.clearState();
 					action = "MANUAL";
 					break;
 			}
@@ -254,8 +253,6 @@ public class LimelightSeekTag extends LinearOpMode {
 			double smoothedTurn = turnPower;
 			if (mode == Mode.MANUAL) {
 				drivetrain.drive(gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x);
-				turnSlew.reset();  // next FOLLOW entry ramps from the actual current power, not a stale one
-				driveSlew.reset();
 			} else {
 				smoothedDrive = driveSlew.calculate(drivePower, dt);
 				smoothedTurn = turnSlew.calculate(turnPower, dt);

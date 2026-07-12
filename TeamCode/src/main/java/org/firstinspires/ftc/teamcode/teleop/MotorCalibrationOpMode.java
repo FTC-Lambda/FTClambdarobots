@@ -56,12 +56,12 @@ public class MotorCalibrationOpMode extends LinearOpMode {
             prevDpadDown  = gamepad1.dpad_down;
 
             // --- Scale adjustment via bumpers (edge-triggered, mutually exclusive) ---
-            // else-if prevents simultaneous press from writing two conflicting values
-            // with a stale currentScale, which would silently discard the RB increment.
-            double currentScale = drivetrain.getMotorScale(selectedMotor);
+            // else-if keeps simultaneous bumper presses mutually exclusive.
             if (gamepad1.right_bumper && !prevRB) {
+                double currentScale = drivetrain.getMotorScale(selectedMotor);
                 drivetrain.setMotorScale(selectedMotor, currentScale + Constants.MOTOR_SCALE_STEP);
             } else if (gamepad1.left_bumper && !prevLB) {
+                double currentScale = drivetrain.getMotorScale(selectedMotor);
                 drivetrain.setMotorScale(selectedMotor, currentScale - Constants.MOTOR_SCALE_STEP);
             }
 
