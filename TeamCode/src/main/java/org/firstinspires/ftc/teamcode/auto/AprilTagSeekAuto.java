@@ -11,6 +11,9 @@ import org.firstinspires.ftc.robotcore.external.navigation.Position;
 import org.firstinspires.ftc.teamcode.hardware.LimelightPipelines;
 import org.firstinspires.ftc.teamcode.hardware.RobotHardware;
 import org.firstinspires.ftc.teamcode.subsystems.Drivetrain;
+import org.firstinspires.ftc.teamcode.util.Constants;
+import org.firstinspires.ftc.teamcode.util.PIDController;
+import org.firstinspires.ftc.teamcode.util.SlewRateLimiter;
 import org.firstinspires.ftc.teamcode.util.VisionDeadband;
 
 import java.util.List;
@@ -35,8 +38,6 @@ public class AprilTagSeekAuto extends LinearOpMode {
 	static final long   SPIN_TIMEOUT_MS    = 3000;  // give up if no tag found in this window
 	static final long   CENTER_TIMEOUT_MS  = 2000;  // give up centering if tag lost
 	static final double DESIRED_DISTANCE   = 12.0;  // inches — stop distance
-	static final double SPEED_GAIN         = 0.02;  // forward proportional gain
-	static final double TURN_GAIN          = 0.02;  // turn proportional gain (center + approach)
 	static final double MAX_DRIVE_SPEED    = 0.4;   // cap on forward power
 	static final double MAX_TURN_SPEED     = 0.3;   // cap on turn correction power
 
@@ -46,12 +47,31 @@ public class AprilTagSeekAuto extends LinearOpMode {
 	private Drivetrain drivetrain;
 	private VisionDeadband deadband;
 
+	// Closed-loop bearing/range control shared by CENTER and APPROACH (see util.PIDController
+	// for why D is computed from the raw measurement, and util.SlewRateLimiter for the final
+	// power smoothing) — same approach as the interactive "Limelight Seek Tag" tool, tuned a
+	// bit more conservatively here since this runs unsupervised during autonomous.
+	private PIDController turnPid;
+	private PIDController drivePid;
+	private SlewRateLimiter turnSlew;
+	private SlewRateLimiter driveSlew;
+
 	@Override
 	public void runOpMode() {
 		robot = new RobotHardware();
 		robot.init(hardwareMap);
 		drivetrain = new Drivetrain(robot);
 		deadband = new VisionDeadband();
+		turnPid = new PIDController(
+				Constants.VISION_AUTO_TURN_KP, Constants.VISION_AUTO_TURN_KI, Constants.VISION_AUTO_TURN_KD,
+				Constants.VISION_AUTO_TURN_INTEGRAL_LIMIT, Constants.VISION_AUTO_TURN_INTEGRAL_ZONE_DEG,
+				Constants.VISION_TURN_DERIVATIVE_FILTER);
+		drivePid = new PIDController(
+				Constants.VISION_AUTO_DRIVE_KP, Constants.VISION_AUTO_DRIVE_KI, Constants.VISION_AUTO_DRIVE_KD,
+				Constants.VISION_AUTO_DRIVE_INTEGRAL_LIMIT, Constants.VISION_AUTO_DRIVE_INTEGRAL_ZONE_IN,
+				Constants.VISION_DRIVE_DERIVATIVE_FILTER);
+		turnSlew = new SlewRateLimiter(Constants.VISION_TURN_SLEW_RATE);
+		driveSlew = new SlewRateLimiter(Constants.VISION_DRIVE_SLEW_RATE);
 
 		robot.limelight.pipelineSwitch(PIPELINE_APRILTAG);
 		robot.limelight.setPollRateHz(100); // ask the Limelight for data 100x/sec
@@ -119,26 +139,40 @@ public class AprilTagSeekAuto extends LinearOpMode {
 
 		// --- CENTER phase ---
 		timer.reset();
+		turnPid.reset();
+		turnSlew.reset();
+		ElapsedTime dtTimer = new ElapsedTime();
 		while (opModeIsActive() && phase == Phase.CENTER) {
+			double dt = dtTimer.seconds();
+			dtTimer.reset();
+
 			LLResult result = robot.limelight.getLatestResult();
 			LLResultTypes.FiducialResult locked = findTag(result, lockedTagId);
 
 			if (locked != null) {
 				double bearing = locked.getTargetXDegrees();
+				double turnOut = turnPid.calculate(bearing, 0.0, dt);
 				if (deadband.isBearingCentered(bearing)) {
 					drivetrain.driveRaw(0, 0, 0);
+					turnSlew.reset();
 					phase = Phase.APPROACH;
 					timer.reset();
 					deadband.clearState();
+					turnPid.reset();
+					drivePid.reset();
+					driveSlew.reset();
 				} else if (deadband.shouldCorrectTurn(bearing)) {
-					double turnPower = clamp(bearing * TURN_GAIN, -SPIN_POWER, SPIN_POWER);
-					drivetrain.driveRaw(0, 0, turnPower);
+					double turnPower = clamp(turnOut, -SPIN_POWER, SPIN_POWER);
+					drivetrain.driveRaw(0, 0, turnSlew.calculate(turnPower, dt));
 				} else {
 					drivetrain.driveRaw(0, 0, 0);
+					turnSlew.reset();
 				}
 				telemetry.addData("CENTER bearing", "%.1f deg", bearing);
 			} else {
 				drivetrain.driveRaw(0, 0, SPIN_POWER); // keep spinning, tag temporarily lost
+				turnPid.reset();
+				turnSlew.reset();
 			}
 
 			if (timer.milliseconds() > CENTER_TIMEOUT_MS) {
@@ -153,7 +187,11 @@ public class AprilTagSeekAuto extends LinearOpMode {
 		drivetrain.driveRaw(0, 0, 0);
 
 		// --- APPROACH phase ---
+		dtTimer.reset();
 		while (opModeIsActive() && phase == Phase.APPROACH) {
+			double dt = dtTimer.seconds();
+			dtTimer.reset();
+
 			LLResult result = robot.limelight.getLatestResult();
 			LLResultTypes.FiducialResult locked = findTag(result, lockedTagId);
 
@@ -167,15 +205,19 @@ public class AprilTagSeekAuto extends LinearOpMode {
 					telemetry.addData("APPROACH", "Reached target at %.1f in", rangeIn);
 				} else {
 					double distError = rangeIn - DESIRED_DISTANCE;
+					double turnOut = turnPid.calculate(bearing, 0.0, dt);
+					double driveOut = drivePid.calculate(rangeIn, DESIRED_DISTANCE, dt);
 					double drive = 0.0;
 					double turn = 0.0;
 					if (deadband.shouldCorrectDrive(distError)) {
-						drive = Math.min(distError * SPEED_GAIN, MAX_DRIVE_SPEED);
+						// Never reverse here: DESIRED_DISTANCE is only ever approached from
+						// beyond it in this phase (see the rangeIn <= DESIRED_DISTANCE branch above).
+						drive = clamp(driveOut, 0.0, MAX_DRIVE_SPEED);
 					}
 					if (deadband.shouldCorrectTurn(bearing)) {
-						turn = clamp(bearing * TURN_GAIN, -MAX_TURN_SPEED, MAX_TURN_SPEED);
+						turn = clamp(turnOut, -MAX_TURN_SPEED, MAX_TURN_SPEED);
 					}
-					drivetrain.driveRaw(drive, 0, turn);
+					drivetrain.driveRaw(driveSlew.calculate(drive, dt), 0, turnSlew.calculate(turn, dt));
 					telemetry.addData("APPROACH range", "%.1f in", rangeIn);
 					telemetry.addData("APPROACH bearing", "%.1f deg", bearing);
 				}
