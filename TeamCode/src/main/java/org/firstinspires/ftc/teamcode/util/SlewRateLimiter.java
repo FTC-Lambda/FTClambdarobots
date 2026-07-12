@@ -30,7 +30,6 @@ public class SlewRateLimiter {
 	/** Next calculate() call will jump straight to its target instead of ramping from the old value. */
 	public void reset() {
 		hasPrev = false;
-		prevValue = 0;
 	}
 
 	private static double clamp(double v, double lo, double hi) {
