@@ -91,11 +91,10 @@ public class Tuning extends SelectableOpMode {
 
     @Override
     public void onSelect() {
-        if (follower == null) {
-            follower = Constants.createFollower(hardwareMap);
+        boolean firstSelection = follower == null;
+        follower = Constants.createFollower(hardwareMap);
+        if (firstSelection) {
             PanelsConfigurables.INSTANCE.refreshClass(this);
-        } else {
-            follower = Constants.createFollower(hardwareMap);
         }
 
         follower.setStartingPose(new Pose());
@@ -113,7 +112,7 @@ public class Tuning extends SelectableOpMode {
             Drawing.drawRobot(follower.getPose());
             Drawing.sendPacket();
         } catch (Exception e) {
-            throw new RuntimeException("Drawing failed " + e);
+            throw new RuntimeException("Drawing failed", e);
         }
     }
 
@@ -418,7 +417,8 @@ class ForwardVelocityTuner extends OpMode {
             } else {
                 follower.setTeleOpDrive(1,0,0,false); // Robot-centric: không bị heading ảnh hưởng
                 //double currentVelocity = Math.abs(follower.getVelocity().getXComponent());
-                double currentVelocity = Math.abs(follower.poseTracker.getLocalizer().getVelocity().getX());
+                double currentVelocity = Math.abs(
+                        follower.getPoseTracker().getLocalizer().getVelocity().getX());
                 velocities.add(currentVelocity);
                 velocities.remove(0);
             }
@@ -438,12 +438,10 @@ class ForwardVelocityTuner extends OpMode {
             }
 
             telemetryM.update(telemetry);
-            telemetry.update();
 
             if (gamepad1.aWasPressed()) {
                 follower.setXVelocity(average);
-                String message = "XMovement: " + average;
-                changes.add(message);
+                changes.add("XMovement: " + average);
             }
         }
     }
@@ -544,8 +542,7 @@ class LateralVelocityTuner extends OpMode {
 
             if (gamepad1.aWasPressed()) {
                 follower.setYVelocity(average);
-                String message = "YMovement: " + average;
-                changes.add(message);
+                changes.add("YMovement: " + average);
             }
         }
     }
@@ -629,7 +626,8 @@ class ForwardZeroPowerAccelerationTuner extends OpMode {
                 }
             } else {
                 double currentVelocity = follower.getVelocity().dot(heading);
-                accelerations.add((currentVelocity - previousVelocity) / ((System.nanoTime() - previousTimeNano) / Math.pow(10.0, 9)));
+                accelerations.add((currentVelocity - previousVelocity)
+                        / ((System.nanoTime() - previousTimeNano) / 1e9));
                 previousVelocity = currentVelocity;
                 previousTimeNano = System.nanoTime();
                 if (currentVelocity < follower.getConstraints().getVelocityConstraint()) {
@@ -650,8 +648,7 @@ class ForwardZeroPowerAccelerationTuner extends OpMode {
 
             if (gamepad1.aWasPressed()) {
                 follower.getConstants().setForwardZeroPowerAcceleration(average);
-                String message = "Forward Zero Power Acceleration: " + average;
-                changes.add(message);
+                changes.add("Forward Zero Power Acceleration: " + average);
             }
         }
     }
@@ -733,7 +730,8 @@ class LateralZeroPowerAccelerationTuner extends OpMode {
                 }
             } else {
                 double currentVelocity = Math.abs(follower.getVelocity().dot(heading));
-                accelerations.add((currentVelocity - previousVelocity) / ((System.nanoTime() - previousTimeNano) / Math.pow(10.0, 9)));
+                accelerations.add((currentVelocity - previousVelocity)
+                        / ((System.nanoTime() - previousTimeNano) / 1e9));
                 previousVelocity = currentVelocity;
                 previousTimeNano = System.nanoTime();
                 if (currentVelocity < follower.getConstraints().getVelocityConstraint()) {
@@ -754,8 +752,7 @@ class LateralZeroPowerAccelerationTuner extends OpMode {
 
             if (gamepad1.aWasPressed()) {
                 follower.getConstants().setLateralZeroPowerAcceleration(average);
-                String message = "Lateral Zero Power Acceleration: " + average;
-                changes.add(message);
+                changes.add("Lateral Zero Power Acceleration: " + average);
             }
         }
     }

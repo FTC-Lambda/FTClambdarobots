@@ -11,12 +11,12 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 
-public class Constants {
-    public static FollowerConstants followerConstants = new FollowerConstants()
+public final class Constants {
+    public static final FollowerConstants followerConstants = new FollowerConstants()
         .forwardZeroPowerAcceleration(-34.6)   // Tuned: Forward Zero Power Acceleration
         .lateralZeroPowerAcceleration(-48.7);  // Tuned: Lateral Zero Power Acceleration
 
-    public static MecanumConstants driveConstants = new MecanumConstants()
+    public static final MecanumConstants driveConstants = new MecanumConstants()
         .leftFrontMotorName("top_left")
         .leftRearMotorName("back_left")
         .rightFrontMotorName("top_right")
@@ -28,7 +28,7 @@ public class Constants {
         .xVelocity(65.48)                      // Tuned: Forward Velocity (in/s)
         .yVelocity(-56.8);                     // Âm: robot strafe về trái khi Y dương (in/s)
 
-    public static PinpointConstants localizerConstants = new PinpointConstants()
+    public static final PinpointConstants localizerConstants = new PinpointConstants()
         .forwardPodY(-3.55) // TODO: Adjust based on your robot's measurements
         .strafePodX(0.91) // TODO: Adjust based on your robot's measurements
         .distanceUnit(DistanceUnit.INCH)
@@ -37,7 +37,9 @@ public class Constants {
         .forwardEncoderDirection(GoBildaPinpointDriver.EncoderDirection.REVERSED)
         .strafeEncoderDirection(GoBildaPinpointDriver.EncoderDirection.REVERSED); // Robot strafe đi trái = encoder đếm dương
 
-    public static PathConstraints pathConstraints = new PathConstraints(0.99, 100, 1, 1);
+    public static final PathConstraints pathConstraints = new PathConstraints(0.99, 100, 1, 1);
+
+    private Constants() {}
 
     public static Follower createFollower(HardwareMap hardwareMap) {
         return new FollowerBuilder(followerConstants, hardwareMap)
