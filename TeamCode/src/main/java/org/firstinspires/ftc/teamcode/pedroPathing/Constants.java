@@ -26,7 +26,7 @@ public final class Constants {
         .rightFrontMotorDirection(DcMotorSimple.Direction.FORWARD)
         .rightRearMotorDirection(DcMotorSimple.Direction.FORWARD)
         .xVelocity(65.48)                      // Tuned: Forward Velocity (in/s)
-        .yVelocity(-56.8);                     // Âm: robot strafe về trái khi Y dương (in/s)
+        .yVelocity(56.8);                      // Tuned: Lateral Velocity (in/s) (Phải là số dương)
 
     public static final PinpointConstants localizerConstants = new PinpointConstants()
         .forwardPodY(-3.55) // TODO: Adjust based on your robot's measurements
@@ -34,7 +34,7 @@ public final class Constants {
         .distanceUnit(DistanceUnit.INCH)
         .hardwareMapName("pinpoint") // Replace with actual hardware map name if different
         .encoderResolution(GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_4_BAR_POD)
-        .forwardEncoderDirection(GoBildaPinpointDriver.EncoderDirection.REVERSED)
+        .forwardEncoderDirection(GoBildaPinpointDriver.EncoderDirection.FORWARD)
         .strafeEncoderDirection(GoBildaPinpointDriver.EncoderDirection.REVERSED); // Robot strafe đi trái = encoder đếm dương
 
     public static final PathConstraints pathConstraints = new PathConstraints(0.99, 100, 1, 1);
