@@ -43,6 +43,6 @@ if that value differs. `AprilTag Seek` also attempts this repair during initiali
 
 ## Current scope
 
-No arm, intake, shooter, servo, or sensor is retrieved from the hardware map. Their
+TODO: No arm, intake, shooter, servo, or sensor is retrieved from the hardware map. Their
 subsystem classes are placeholders, so do not add their controller names here until
 code uses them.
