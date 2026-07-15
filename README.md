@@ -33,6 +33,14 @@ Our code is organized in the [/TeamCode](TeamCode) folder, which contains:
 * **Subsystems** - Modular robot subsystems (Drivetrain, Arm, Intake, Shooter, etc.)
 * **Util** - Utilities and constants
 
+### Robot setup references
+
+The code's required Control Hub hardware-map names, ports-to-record checklist, and
+vision setup are in [Hardware configuration](docs/HARDWARE_CONFIGURATION.md). Pedro
+Pathing's active follower/localizer configuration and tuning order are in
+[Pedro Pathing](docs/PEDRO_PATHING.md). The exact registered OpModes are listed in
+[OpModes](docs/OPMODES.md).
+
 ### Building and Running
 
 1. Clone or download this repository
