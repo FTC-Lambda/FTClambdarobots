@@ -37,7 +37,7 @@ public final class Constants {
         .forwardEncoderDirection(GoBildaPinpointDriver.EncoderDirection.FORWARD)
         .strafeEncoderDirection(GoBildaPinpointDriver.EncoderDirection.REVERSED); // Robot strafe đi trái = encoder đếm dương
 
-    public static final PathConstraints pathConstraints = new PathConstraints(0.99, 100, 1, 1);
+    public static final PathConstraints pathConstraints = new PathConstraints(0.40, 100, 1, 1);
 
     private Constants() {}
 
