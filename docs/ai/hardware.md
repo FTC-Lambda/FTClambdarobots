@@ -1,58 +1,41 @@
-AI Hardware Notes
+# Hardware configuration
 
-> **This document reflects the current codebase, not necessarily the physical robot.**
-> If hardware changes on the robot before the code is updated, `RobotHardware.java` remains the software source of truth until synchronized.
+This is the source-of-truth checklist for hardware names expected in the Control Hub or Robot Controller hardware map. The device configuration itself is stored on the robot controller, not in this repository.
 
-Authoritative source: `TeamCode/src/main/java/org/firstinspires.ftc.teamcode/hardware/RobotHardware.java`.
+Software sources:
 
-- **Hardware map (from `RobotHardware.java`):**
-  - Motors (DcMotor):
-    - `topLeft` — hardware name: `top_left`
-    - `topRight` — hardware name: `top_right`
-    - `backLeft` — hardware name: `back_left`
-    - `backRight` — hardware name: `back_right`
-  - Camera:
-    - Limelight 3A: `limelight` (type: `Limelight3A`)
+- `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/hardware/RobotHardware.java` for the regular drivetrain and Limelight.
+- `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/pedroPathing/Constants.java` for Pedro Pathing drivetrain and Pinpoint names.
 
-- **Notes / unknowns (do not invent):**
-  - Encoder presence, motor directions, and per-motor scaling are declared elsewhere; see below.
-  - No servos or IMU are declared in `RobotHardware.java`; list any additional devices by inspecting the rest of the `hardware` package.
-  - USB webcam calibrations file exists at `TeamCode/src/main/res/xml/teamwebcamcalibrations.xml` (contains commented example entries; no active camera calibrations found).
+Change the source file, this document, and the controller configuration together when hardware is renamed.
 
-- **Drive & motor calibration (from `Constants.java` and `Drivetrain.java`):**
-  - `DRIVE_SPEED`: 0.5 (applied after input squaring in `Drivetrain.drive()`)
-  - Motor scale bounds: `MOTOR_SCALE_MIN` = 0.0, `MOTOR_SCALE_MAX` = 2.0, step = `MOTOR_SCALE_STEP` = 0.05
-  - Default per-motor scales (field-tuned):
-    - `TOP_LEFT_SCALE` = 1.00 (applied to `top_left`)
-    - `BACK_LEFT_SCALE` = 1.40 (applied to `back_left`)
-    - `TOP_RIGHT_SCALE` = 1.00 (applied to `top_right`)
-    - `BACK_RIGHT_SCALE` = 1.40 (applied to `back_right`)
-  - `Drivetrain` applies these scales after normalization and clamps power to [-1, 1]. `driveRaw(...)` is available for raw-power autonomous control (also applies scales).
+## Required devices
 
-- **Encoders & modes:**
-  - I found no explicit `setMode(...)` or calls to `getCurrentPosition()` in the codebase, so motors are not configured for encoder-based closed-loop control in `RobotHardware`/`Drivetrain`.
-  - TODO: if encoders are required for an OpMode, update `RobotHardware.init()` or OpMode init to set `RUN_USING_ENCODER` and/or read positions.
+| Hardware-map name | FTC device type | Used by | Notes |
+| --- | --- | --- | --- |
+| `top_left` | DC motor | standard drivetrain, Pedro | Physical front-left drive motor. |
+| `back_left` | DC motor | standard drivetrain, Pedro | Physical rear-left drive motor. |
+| `top_right` | DC motor | standard drivetrain, Pedro | Physical front-right drive motor. |
+| `back_right` | DC motor | standard drivetrain, Pedro | Physical rear-right drive motor. |
+| `limelight` | Limelight 3A | vision TeleOps and `AprilTag Seek` | USB-connected Limelight 3A. |
+| `pinpoint` | goBILDA Pinpoint | Pedro tuning only | I2C device used by Pedro's Pinpoint localizer. |
 
-- **Servos:**
-  - No `Servo` or `CRServo` usages were found in `TeamCode/` — none documented here.
+The software sets all four Pedro drive directions to `FORWARD`. `RobotHardware` does not set motor direction, zero-power behavior, encoder mode, or port assignments. Record and verify those choices in the controller configuration.
 
-- **IMU / sensors:**
-  - No IMU (`BNO055IMU` or similar) or other sensors are declared in `RobotHardware.java` or elsewhere in `TeamCode/`.
-  - TODO: add IMU or other sensor entries once present in code or hardware config.
+## Controller setup checklist
 
-- **Cameras / vision:**
-  - `limelight` (Limelight 3A) — used by vision OpModes such as `LimelightSeekTag` and `LimelightTest` (see `TeamCode/src/main/java/.../teleop`).
-  - Pipeline selection and exposure are controlled in the Limelight web UI; ensure pipeline 0 is configured for AprilTag if using AprilTag OpModes.
+1. Configure the four drive motors and name them exactly as shown above.
+2. Add the Limelight 3A as `limelight` and confirm its USB connection is healthy.
+3. Add the goBILDA Pinpoint as `pinpoint` when using Pedro Pathing or its tuning OpMode. It is not needed by the ordinary or vision drivetrain OpModes.
+4. Save the controller configuration, power-cycle the robot, then initialize `LambdaGoWild`. A missing name or wrong device type fails at initialization.
+5. Run `Motor Calibration` after drive hardware changes. Its defaults are currently `top_left=1.00`, `back_left=1.40`, `top_right=1.00`, `back_right=1.40`.
 
-- **Control Hub / Rev Hub:**
-  - Hardware platform (Control Hub vs Expansion Hub) is not declared in code; this is configured on-device. TODO: document hub types and firmware versions from your robot inventory.
+## Limelight setup
 
-- **Wiring notes:**
-  - TODO: add wiring diagram references or photos.
+Vision OpModes use pipeline `0`. Run `Limelight Pipeline Setup` once to make it an FTC `aprilClassic36h11` fiducial pipeline, enable its 3D solve, and reset its crop to the full sensor frame.
 
-- **Cameras:**
-  - `limelight` (Limelight 3A) — pipeline configuration is external (Limelight web UI). Ensure pipeline 0 is set to AprilTag if using AprilTag OpModes.
+The configured tag edge size is `165.1 mm`. Measure the printed black square and update both `LimelightPipelineSetup` and `AprilTagSeekAuto` if that value differs. `AprilTag Seek` also attempts this repair during initialization.
 
-- **Guidance for updates:**
-  - Update `RobotHardware.java` first when adding/removing devices, then mirror concise entries here.
-  - Keep entries factual; if a detail is unknown, leave a TODO referencing the source file.
+## Current scope
+
+No arm, intake, shooter, servo, IMU, or extra sensor is retrieved from the hardware map. Their subsystem classes are placeholders, so do not add controller names here until code uses them.

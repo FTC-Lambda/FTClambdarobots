@@ -1,46 +1,39 @@
-# AI Architecture — Lambda Robotics
+# AI architecture notes
 
-This file collects high-level architecture and AI-relevant notes for developer agents and humans. Source-of-truth references: project `README.md`, `TeamCode` packages, and the AprilTag design spec.
+This file summarizes the codebase structure for developer agents and human maintainers. Treat source files as authoritative when this document disagrees with code.
 
-- **Purpose:** summarize package layout, subsystems, control and command flow, vision pipeline, and autonomous structure for AI-first workflows.
+## Key packages
 
-- **Package layout (key folders):**
-	- `TeamCode/src/main/java/org/firstinspires.ftc.teamcode/auto` — autonomous OpModes
-	- `TeamCode/src/main/java/org/firstinspires.ftc.teamcode/teleop` — teleop OpModes
-	- `TeamCode/src/main/java/org/firstinspires.ftc.teamcode/hardware` — `RobotHardware.java` (hardware map)
-	- `TeamCode/src/main/java/org/firstinspires.ftc.teamcode/subsystems` — `Drivetrain`, `Arm`, `Intake`, `Shooter`
-	- `TeamCode/src/main/java/org/firstinspires.ftc.teamcode/util` — constants and helpers
+| Path | Purpose |
+| --- | --- |
+| `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/auto` | autonomous OpModes |
+| `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/teleop` | TeleOp and setup OpModes |
+| `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/hardware` | `RobotHardware.java` hardware map access |
+| `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/subsystems` | drivetrain plus placeholder mechanism subsystem classes |
+| `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/util` | constants, PID, rate limit, vision helpers |
+| `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/pedroPathing` | Pedro Pathing constants and tuning OpMode |
 
-- **Subsystems (confirmed):**
-	- `Drivetrain` — movement + odometry
-	- `Arm` — arm mechanism
-	- `Intake` — game piece intake
-	- `Shooter` — shooting mechanism
-	- TODO: any additional subsystems — check `subsystems` folder for names and responsibilities
+## Confirmed runtime structure
 
-- **Control flow / command flow:**
-	- TeleOp OpModes instantiate `RobotHardware` and subsystem objects and call subsystem `drive()` / control methods each loop.
-	- Autonomous OpModes are implemented as `LinearOpMode` or iterative OpModes that sequence phases (see AprilTag specs).
-	- TODO: list command scheduler or pattern if present (e.g., command-based) — search codebase for scheduler usage.
+- `RobotHardware` retrieves four drive motors and the Limelight from the FTC hardware map.
+- `Drivetrain` owns mecanum drive power calculation for regular TeleOp and autonomous code.
+- `MainTeleOp` runs standard robot-centric mecanum driving with squared joystick response and configured drive sensitivity.
+- `MotorCalibrationOpMode` tunes temporary per-motor drivetrain scale factors and reports values through telemetry.
+- Limelight TeleOps and `AprilTagSeekAuto` use pipeline `0` for AprilTag work.
+- Pedro Pathing is configured separately through `pedroPathing/Constants.java` and the `Tuning` TeleOp.
 
-- **Vision pipeline:**
-	- Project uses Limelight 3A (AprilTag pipeline referenced in specs and plans).
-	- Camera configured in hardware as `limelight` (see AprilTag spec). Pipeline 0 expected to be an AprilTag pipeline.
-	- Vision consumers: `AprilTagSeekAuto` (design/spec), other OpModes may reference Limelight classes.
-	- TODO: confirm exact Limelight Java classes and calls by inspecting `hardware/` and `auto/` code.
+## Placeholder code
 
-- **Autonomous structure (example from AprilTag spec):**
-	- Phased `LinearOpMode`: SPIN → CENTER → APPROACH
-	- Uses `Drivetrain.driveRaw(...)` for raw motor control (plan calls for adding this method).
-	- Tunable constants should be `static final` at top of OpMode classes.
+`Arm`, `Intake`, and `Shooter` exist as subsystem placeholders but do not retrieve hardware or control real devices yet. Do not invent hardware map names for them.
 
-- **How AI agents should use these docs:**
-	- Read `RobotHardware.java` for authoritative hardware names and ports before proposing code changes.
-	- Reuse existing spec/plan content (migrated here or referenced) rather than duplicating.
-	- Leave TODO placeholders where hardware or parameters are unknown.
+`BasicAuto.java` is empty and does not register an OpMode.
 
-References:
-- `README.md` — project intro, subsystem list, motor calibration procedure
-- `docs/superpowers/specs/2026-06-24-apriltag-seek-auto-design.md` — AprilTag autonomous design (migrated content should be condensed here)
-- `docs/superpowers/plans/2026-06-24-apriltag-seek-auto.md` — implementation plan (use for developer tasks)
+## Agent rules
 
+Before changing robot behavior:
+
+1. Read `RobotHardware.java` before touching hardware names.
+2. Read the relevant OpMode and subsystem end to end.
+3. Reuse constants and helpers in `util` before adding new control code.
+4. Keep autonomous loops stop-aware, timeout-aware, and able to stop motors.
+5. Treat physical behavior as unconfirmed until humans test the robot.

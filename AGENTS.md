@@ -61,6 +61,8 @@ Use `docs/ai` selectively:
 - `architecture.md` for repo structure.
 - `hardware.md` for hardware names.
 - `debugging.md` for unknown robot behavior.
-- `prompts.md` for reusable task templates.
+- `testing.md` for test coverage and patterns.
+- `opmodes.md` for OpMode patterns and naming.
+- `pedro-pathing.md` for Pedro Pathing configuration and tuning.
 
 ---
