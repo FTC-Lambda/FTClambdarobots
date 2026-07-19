@@ -21,8 +21,14 @@ android {
     packagingOptions {
         jniLibs.useLegacyPackaging true
     }
+
+    testOptions {
+        unitTests.includeAndroidResources = false
+        unitTests.returnDefaultValues = true
+    }
 }
 
 dependencies {
     implementation project(':FtcRobotController')
+    testImplementation 'junit:junit:4.13.2'
 }
