@@ -2,6 +2,7 @@ package org.firstinspires.ftc.teamcode.vision;
 
 import org.junit.Test;
 
+import static org.firstinspires.ftc.robotcore.internal.system.Assert.assertEquals;
 import static org.junit.Assert.assertEquals;
 
 public class BallColorTest {
