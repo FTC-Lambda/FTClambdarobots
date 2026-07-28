@@ -22,6 +22,7 @@ public class LimelightTest extends LinearOpMode {
 		robot.init(hardwareMap);
 
 		robot.limelight.setPollRateHz(100);
+		robot.limelight.pipelineSwitch(1);
 		robot.limelight.start();
 
 		telemetry.addLine("Test-Vision ready — press START");
