@@ -18,6 +18,7 @@ import org.firstinspires.ftc.teamcode.vision.LimelightVision;
  *   A — switch to ball pipeline (1)
  *   B — switch to AprilTag pipeline (0)
  *   X / Y — prefer green / purple (or clear with bumpers)
+ *   Back — toggle per-detection debug telemetry
  */
 @TeleOp(name = "Ball Vision Test", group = "Test")
 public class BallVisionTest extends LinearOpMode {
@@ -29,29 +30,51 @@ public class BallVisionTest extends LinearOpMode {
 		Drivetrain drivetrain = new Drivetrain(robot);
 
 		LimelightVision vision = new LimelightVision(robot.limelight);
-		vision.start();
+		// Select the pipeline before starting so the camera never boots on pipeline 0.
 		vision.useBallDetectionPipeline();
+		vision.start();
+		vision.setDebugTelemetry(true);
 
-		telemetry.addLine("Ball Vision Test — A=balls B=AprilTag");
+		boolean debug = true;
+		boolean prevA = false;
+		boolean prevB = false;
+		boolean prevX = false;
+		boolean prevY = false;
+		boolean prevBumper = false;
+		boolean prevBack = false;
+
+		telemetry.addLine("Ball Vision Test — A=balls B=AprilTag Back=debug");
 		telemetry.update();
 		waitForStart();
 
 		while (opModeIsActive()) {
-			if (gamepad1.a) {
+			// Edge-triggered: holding a button must not re-request a switch every loop.
+			boolean bumper = gamepad1.left_bumper || gamepad1.right_bumper;
+			if (gamepad1.a && !prevA) {
 				vision.useBallDetectionPipeline();
 			}
-			if (gamepad1.b) {
+			if (gamepad1.b && !prevB) {
 				vision.useAprilTagPipeline();
 			}
-			if (gamepad1.x) {
+			if (gamepad1.x && !prevX) {
 				vision.setDesiredBallColor(BallColor.GREEN);
 			}
-			if (gamepad1.y) {
+			if (gamepad1.y && !prevY) {
 				vision.setDesiredBallColor(BallColor.PURPLE);
 			}
-			if (gamepad1.left_bumper || gamepad1.right_bumper) {
+			if (bumper && !prevBumper) {
 				vision.setDesiredBallColor(null);
 			}
+			if (gamepad1.back && !prevBack) {
+				debug = !debug;
+				vision.setDebugTelemetry(debug);
+			}
+			prevA = gamepad1.a;
+			prevB = gamepad1.b;
+			prevX = gamepad1.x;
+			prevY = gamepad1.y;
+			prevBumper = bumper;
+			prevBack = gamepad1.back;
 
 			vision.update();
 			drivetrain.drive(gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x);

@@ -31,6 +31,7 @@ public class LimelightVision {
 	private List<BallDetection> rawDetections = Collections.emptyList();
 	private List<BallDetection> filteredDetections = Collections.emptyList();
 	private List<BallGroup> groups = Collections.emptyList();
+	private final BallGrouping.RejectCounts rejects = new BallGrouping.RejectCounts();
 	private BallTarget target = BallTarget.none();
 	private long lastStalenessMs;
 	private double lastLatencyMs;
@@ -124,7 +125,7 @@ public class LimelightVision {
 		}
 
 		if (result == null || !result.isValid()) {
-			target = persistence.update(now, Double.NaN, Optional.empty());
+			loseTarget(now);
 			return;
 		}
 
@@ -134,16 +135,21 @@ public class LimelightVision {
 
 		if (result.getPipelineIndex() != requestedPipeline) {
 			pipelineReady = false;
-			target = persistence.update(now, Double.NaN, Optional.empty());
+			loseTarget(now);
 			return;
 		}
 
 		if (lastStalenessMs > BallVisionConfig.MAX_RESULT_STALENESS_MS) {
-			target = persistence.update(now, Double.NaN, Optional.empty());
+			loseTarget(now);
 			return;
 		}
 
 		double frameTs = result.getTimestamp();
+		if (frameTs == 0.0) {
+			// Some firmware omits the "ts" field, which would pin every frame at 0.0 and make
+			// newFrame permanently false after the first one, silently freezing the pipeline.
+			frameTs = result.getControlHubTimeStamp();
+		}
 		boolean newFrame = Double.isNaN(lastAcceptedFrameTs) || frameTs != lastAcceptedFrameTs;
 		if (!pipelineReady) {
 			pipelineReady = true;
@@ -165,10 +171,15 @@ public class LimelightVision {
 
 		lastAcceptedFrameTs = frameTs;
 		rawDetections = parseDetections(result);
-		filteredDetections = BallGrouping.filterDetections(rawDetections);
-		groups = BallGrouping.groupDetections(filteredDetections);
-		Optional<BallGroup> best = BallGrouping.selectBestGroup(groups, persistence.getDesiredColor());
-		target = persistence.update(now, frameTs, best);
+		filteredDetections = BallGrouping.filterDetections(rawDetections, rejects);
+		groups = BallGrouping.groupDetections(filteredDetections, persistence.getDesiredColor());
+		target = persistence.update(now, frameTs, groups);
+	}
+
+	/** No usable frame this loop: drop frame data but let persistence hold a recent target. */
+	private void loseTarget(long now) {
+		clearFrameState();
+		target = persistence.update(now, Double.NaN, Optional.empty());
 	}
 
 	public List<BallDetection> getBallDetections() {
@@ -180,7 +191,7 @@ public class LimelightVision {
 	}
 
 	public Optional<BallGroup> getBestBallGroup() {
-		return BallGrouping.selectBestGroup(groups, null);
+		return BallGrouping.selectBestGroup(groups);
 	}
 
 	public Optional<BallGroup> getBestBallGroup(BallColor desiredColor) {
@@ -206,24 +217,52 @@ public class LimelightVision {
 		if (requestedPipeline == BallVisionConfig.PIPELINE_BALL) {
 			telemetry.addData("Balls raw/filt/groups", "%d / %d / %d",
 					rawDetections.size(), filteredDetections.size(), groups.size());
+			if (rejects.total() > 0) {
+				telemetry.addData("Rejected", rejects.toString());
+			}
 			BallTarget t = target;
 			if (t.isValid()) {
 				telemetry.addData("Target", "sz=%d tx=%.1f ty=%.1f age=%dms %s",
 						t.getGroupSize(), t.getHorizontalErrorDeg(), t.getVerticalAngleDeg(),
 						t.getAgeMs(), t.isFresh() ? "fresh" : "held");
-				telemetry.addData("Target G/P score", "%d/%d %.2f",
-						t.getGreenCount(), t.getPurpleCount(), t.getScore());
+				Optional<BallGroup> sticky = persistence.getStickyGroup();
+				double maxTa = sticky.isPresent()
+						? BallGrouping.apparentCloseness(sticky.get())
+						: 0.0;
+				telemetry.addData("Target G/P maxTa score", "%d/%d ta=%.3f %.2f",
+						t.getGreenCount(), t.getPurpleCount(), maxTa, t.getScore());
 			} else {
 				telemetry.addData("Target", "none");
 			}
 		}
 		if (debugTelemetry) {
-			for (int i = 0; i < filteredDetections.size(); i++) {
-				BallDetection d = filteredDetections.get(i);
-				telemetry.addData("Det" + i, "%s conf=%.0f ta=%.2f tx=%.1f",
-						d.getClassName(), d.getConfidence(), d.getTargetArea(), d.getTxDeg());
+			// Walk the raw list, not the filtered one, so a rejected detection still shows the
+			// values that got it dropped. This is the view that diagnoses an empty filter.
+			for (int i = 0; i < rawDetections.size(); i++) {
+				BallDetection d = rawDetections.get(i);
+				telemetry.addData("Det" + i, "%s conf=%.2f ta=%.3f tx=%.1f ty=%.1f box=%s %s",
+						d.getClassName(), d.getConfidence(), d.getTargetArea(),
+						d.getTxDeg(), d.getTyDeg(), d.hasPixelBox() ? "y" : "n",
+						rejectReason(d));
 			}
 		}
+	}
+
+	/** Which filter gate a raw detection fails, for debug telemetry. */
+	private static String rejectReason(BallDetection d) {
+		if (d.getConfidence() < BallVisionConfig.MIN_CONFIDENCE) {
+			return "DROP:conf";
+		}
+		if (d.getTargetArea() < BallVisionConfig.MIN_TARGET_AREA) {
+			return "DROP:area";
+		}
+		if (d.getColor() != BallColor.GREEN && d.getColor() != BallColor.PURPLE) {
+			return "DROP:color";
+		}
+		if (BallGrouping.isNearImageEdge(d)) {
+			return "DROP:edge";
+		}
+		return "ok";
 	}
 
 	private void clearFrameState() {
@@ -271,17 +310,16 @@ public class LimelightVision {
 				} else {
 					cx = dr.getTargetXPixels();
 					cy = dr.getTargetYPixels();
-					double side = Math.max(4.0, Math.sqrt(Math.max(0.0, dr.getTargetArea())) * 8.0);
-					w = side;
-					h = side;
+					w = 0.0;
+					h = 0.0;
 					hasBox = false;
 				}
 			} else {
+				// No corner data, so box size is unknown; grouping falls back to tx/ty angles.
 				cx = dr.getTargetXPixels();
 				cy = dr.getTargetYPixels();
-				double side = Math.max(4.0, Math.sqrt(Math.max(0.0, dr.getTargetArea())) * 8.0);
-				w = side;
-				h = side;
+				w = 0.0;
+				h = 0.0;
 				hasBox = false;
 			}
 			out.add(new BallDetection(

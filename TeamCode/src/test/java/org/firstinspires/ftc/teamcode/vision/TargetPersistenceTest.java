@@ -2,6 +2,7 @@ package org.firstinspires.ftc.teamcode.vision;
 
 import org.junit.Test;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Optional;
 
@@ -11,11 +12,15 @@ import static org.junit.Assert.assertTrue;
 
 public class TargetPersistenceTest {
 
-	private static BallGroup group(double tx, double ty, int size) {
+	private static BallGroup group(double tx, double ty, int size, double area) {
 		BallDetection d = new BallDetection(
-				"green", 80, tx, ty, 2.0, Collections.emptyList(),
+				"green", 0.8, tx, ty, area, Collections.emptyList(),
 				1.0, 1000L, 160, 120, 40, 40, true);
 		return BallGrouping.buildGroup(Collections.nCopies(size, d), null);
+	}
+
+	private static BallGroup group(double tx, double ty, int size) {
+		return group(tx, ty, size, 0.02);
 	}
 
 	@Test
@@ -42,6 +47,29 @@ public class TargetPersistenceTest {
 		BallGroup far = group(25, 0, 1);
 		assertTrue(TargetPersistence.areAssociated(a, b));
 		assertFalse(TargetPersistence.areAssociated(a, far));
+	}
+
+	@Test
+	public void staysOnTrackedClusterWhenAreasAreSimilar() {
+		TargetPersistence p = new TargetPersistence();
+		p.update(1000L, 1.0, Optional.of(group(0, 0, 1, 0.02)));
+
+		// Drifted tracked pile vs another pile at similar size — stay locked.
+		BallGroup drifted = group(3, 0, 1, 0.021);
+		BallGroup other = group(20, 0, 1, 0.022);
+		BallTarget next = p.update(1100L, 2.0, Arrays.asList(other, drifted));
+		assertEquals(3.0, next.getHorizontalErrorDeg(), 1e-6);
+	}
+
+	@Test
+	public void switchesWhenAnotherGroupIsClearlyCloser() {
+		TargetPersistence p = new TargetPersistence();
+		p.update(1000L, 1.0, Optional.of(group(20, 0, 1, 0.02)));
+
+		BallGroup nearer = group(5, 0, 1, 0.05);
+		BallTarget next = p.update(1100L, 2.0, Arrays.asList(group(20, 0, 1, 0.02), nearer));
+		assertEquals(5.0, next.getHorizontalErrorDeg(), 1e-6);
+		assertEquals(0.05, BallGrouping.apparentCloseness(p.getStickyGroup().get()), 1e-9);
 	}
 
 	@Test

@@ -15,7 +15,39 @@ public final class BallGrouping {
 
 	private BallGrouping() {}
 
+	/** Per-frame tally of why detections were dropped, for driver-station diagnosis. */
+	public static final class RejectCounts {
+		public int lowConfidence;
+		public int smallArea;
+		public int unknownColor;
+		public int nearEdge;
+
+		public void reset() {
+			lowConfidence = 0;
+			smallArea = 0;
+			unknownColor = 0;
+			nearEdge = 0;
+		}
+
+		public int total() {
+			return lowConfidence + smallArea + unknownColor + nearEdge;
+		}
+
+		@Override
+		public String toString() {
+			return "conf=" + lowConfidence + " area=" + smallArea
+					+ " color=" + unknownColor + " edge=" + nearEdge;
+		}
+	}
+
 	public static List<BallDetection> filterDetections(List<BallDetection> raw) {
+		return filterDetections(raw, null);
+	}
+
+	public static List<BallDetection> filterDetections(List<BallDetection> raw, RejectCounts counts) {
+		if (counts != null) {
+			counts.reset();
+		}
 		if (raw == null || raw.isEmpty()) {
 			return Collections.emptyList();
 		}
@@ -25,15 +57,27 @@ public final class BallGrouping {
 				continue;
 			}
 			if (d.getConfidence() < BallVisionConfig.MIN_CONFIDENCE) {
+				if (counts != null) {
+					counts.lowConfidence++;
+				}
 				continue;
 			}
 			if (d.getTargetArea() < BallVisionConfig.MIN_TARGET_AREA) {
+				if (counts != null) {
+					counts.smallArea++;
+				}
 				continue;
 			}
 			if (d.getColor() != BallColor.GREEN && d.getColor() != BallColor.PURPLE) {
+				if (counts != null) {
+					counts.unknownColor++;
+				}
 				continue;
 			}
 			if (isNearImageEdge(d)) {
+				if (counts != null) {
+					counts.nearEdge++;
+				}
 				continue;
 			}
 			out.add(d);
@@ -41,21 +85,19 @@ public final class BallGrouping {
 		return out;
 	}
 
+	/**
+	 * Angular edge test. Deliberately not pixel-based: corner coordinates arrive in
+	 * whatever resolution the pipeline captures at, so a hardcoded frame size would
+	 * silently reject valid detections whenever that resolution changed.
+	 */
 	public static boolean isNearImageEdge(BallDetection d) {
-		double marginX = BallVisionConfig.IMAGE_WIDTH_PX * BallVisionConfig.EDGE_MARGIN_FRACTION;
-		double marginY = BallVisionConfig.IMAGE_HEIGHT_PX * BallVisionConfig.EDGE_MARGIN_FRACTION;
-		if (d.hasPixelBox()) {
-			double left = d.getCenterXPx() - d.getWidthPx() / 2.0;
-			double right = d.getCenterXPx() + d.getWidthPx() / 2.0;
-			double top = d.getCenterYPx() - d.getHeightPx() / 2.0;
-			double bottom = d.getCenterYPx() + d.getHeightPx() / 2.0;
-			return left < marginX
-					|| right > BallVisionConfig.IMAGE_WIDTH_PX - marginX
-					|| top < marginY
-					|| bottom > BallVisionConfig.IMAGE_HEIGHT_PX - marginY;
-		}
-		// Angular fallback: treat large |tx|/|ty| as near FOV edge (~±30° typical).
-		return Math.abs(d.getTxDeg()) > 25.0 || Math.abs(d.getTyDeg()) > 20.0;
+		return isNearAngularEdge(d.getTxDeg(), d.getTyDeg(), 0.0);
+	}
+
+	static boolean isNearAngularEdge(double txDeg, double tyDeg, double marginDeg) {
+		return Math.abs(txDeg) > BallVisionConfig.EDGE_MAX_TX_DEG - marginDeg
+				|| tyDeg > BallVisionConfig.EDGE_MAX_TY_DEG - marginDeg
+				|| tyDeg < BallVisionConfig.EDGE_MIN_TY_DEG + marginDeg;
 	}
 
 	/**
@@ -83,8 +125,13 @@ public final class BallGrouping {
 				&& Math.abs(a.getTyDeg() - b.getTyDeg()) <= BallVisionConfig.MAX_TY_DIFF_DEG;
 	}
 
-	/** Deterministic BFS connected-components grouping. */
 	public static List<BallGroup> groupDetections(List<BallDetection> detections) {
+		return groupDetections(detections, null);
+	}
+
+	/** Deterministic BFS connected-components grouping, capped by group angular span. */
+	public static List<BallGroup> groupDetections(
+			List<BallDetection> detections, BallColor desiredColor) {
 		if (detections == null || detections.isEmpty()) {
 			return Collections.emptyList();
 		}
@@ -100,22 +147,39 @@ public final class BallGrouping {
 			ArrayDeque<Integer> queue = new ArrayDeque<>();
 			queue.add(i);
 			visited[i] = true;
+			double minTx = detections.get(i).getTxDeg();
+			double maxTx = minTx;
 			while (!queue.isEmpty()) {
 				int cur = queue.removeFirst();
 				members.add(detections.get(cur));
 				for (int j = 0; j < n; j++) {
-					if (!visited[j] && areNearby(detections.get(cur), detections.get(j))) {
-						visited[j] = true;
-						queue.add(j);
+					if (visited[j]) {
+						continue;
 					}
+					BallDetection candidate = detections.get(j);
+					if (!areNearby(detections.get(cur), candidate)) {
+						continue;
+					}
+					double nextMin = Math.min(minTx, candidate.getTxDeg());
+					double nextMax = Math.max(maxTx, candidate.getTxDeg());
+					if (nextMax - nextMin > BallVisionConfig.MAX_GROUP_SPAN_DEG) {
+						continue;
+					}
+					minTx = nextMin;
+					maxTx = nextMax;
+					visited[j] = true;
+					queue.add(j);
 				}
 			}
-			groups.add(buildGroup(members, null));
+			groups.add(buildGroup(members, desiredColor));
 		}
 		return groups;
 	}
 
 	public static BallGroup buildGroup(List<BallDetection> members, BallColor desiredColor) {
+		if (members == null || members.isEmpty()) {
+			throw new IllegalArgumentException("buildGroup requires at least one member");
+		}
 		List<BallDetection> copy = new ArrayList<>(members);
 		copy.sort(Comparator
 				.comparingDouble(BallDetection::getTxDeg)
@@ -163,8 +227,7 @@ public final class BallGrouping {
 		double weightedTy = wSumTy / wSum;
 		double avgArea = sumArea / size;
 		double avgConf = sumConf / size;
-		double score = scoreGroup(avgTx, avgTy, size, sumArea, avgConf, green, purple,
-				anyBox, minX, maxX, minY, maxY, desiredColor);
+		double score = scoreGroup(avgTx, avgTy, size, sumArea, avgConf, green, purple, desiredColor);
 
 		return new BallGroup(
 				copy, avgTx, avgTy, weightedTx, weightedTy,
@@ -181,59 +244,113 @@ public final class BallGrouping {
 			double avgConf,
 			int green,
 			int purple,
-			boolean hasBox,
-			double minX,
-			double maxX,
-			double minY,
-			double maxY,
 			BallColor desiredColor) {
 		double score = 0.0;
 		double centerline = 1.0 - Math.min(1.0, Math.abs(avgTx) / BallVisionConfig.CENTERLINE_SOFT_DEG);
 		score += BallVisionConfig.SCORE_CENTERLINE * centerline;
-		score += BallVisionConfig.SCORE_SIZE * Math.min(1.0, size / 3.0);
-		score += BallVisionConfig.SCORE_AREA * Math.min(1.0, totalArea / 10.0);
-		score += BallVisionConfig.SCORE_CONFIDENCE * Math.min(1.0, avgConf / 100.0);
+		score += BallVisionConfig.SCORE_SIZE
+				* Math.min(1.0, (double) size / BallVisionConfig.SCORE_SIZE_SATURATION);
+		score += BallVisionConfig.SCORE_AREA
+				* Math.min(1.0, totalArea / BallVisionConfig.SCORE_AREA_SATURATION);
+		score += BallVisionConfig.SCORE_CONFIDENCE * Math.min(1.0, avgConf);
 
 		if (desiredColor == BallColor.GREEN || desiredColor == BallColor.PURPLE) {
 			int desired = desiredColor == BallColor.GREEN ? green : purple;
 			int other = desiredColor == BallColor.GREEN ? purple : green;
 			score += BallVisionConfig.SCORE_DESIRED_COLOR * Math.min(1.0, desired / 2.0);
-			if (desired == 0 && other > 0) {
-				score -= BallVisionConfig.PENALTY_WRONG_COLOR;
+			if (other > 0) {
+				// Scaled by the mismatched fraction, not all-or-nothing: the aimpoint is the
+				// group mean, so even one wrong-colour member drags the robot off target.
+				score -= BallVisionConfig.PENALTY_WRONG_COLOR
+						* ((double) other / (desired + other));
 			}
 		}
 
-		if (avgConf < BallVisionConfig.MIN_CONFIDENCE + 10.0) {
+		if (avgConf < BallVisionConfig.MIN_CONFIDENCE + BallVisionConfig.LOW_CONFIDENCE_MARGIN) {
 			score -= BallVisionConfig.PENALTY_LOW_CONFIDENCE;
 		}
 
-		if (hasBox) {
-			double marginX = BallVisionConfig.IMAGE_WIDTH_PX * BallVisionConfig.EDGE_MARGIN_FRACTION * 2.0;
-			double marginY = BallVisionConfig.IMAGE_HEIGHT_PX * BallVisionConfig.EDGE_MARGIN_FRACTION * 2.0;
-			if (minX < marginX || maxX > BallVisionConfig.IMAGE_WIDTH_PX - marginX
-					|| minY < marginY || maxY > BallVisionConfig.IMAGE_HEIGHT_PX - marginY) {
-				score -= BallVisionConfig.PENALTY_EDGE;
-			}
-		} else if (Math.abs(avgTx) > 20.0 || Math.abs(avgTy) > 15.0) {
+		if (isNearAngularEdge(avgTx, avgTy, BallVisionConfig.EDGE_PENALTY_MARGIN_DEG)) {
 			score -= BallVisionConfig.PENALTY_EDGE;
 		}
 
 		return score;
 	}
 
+	/**
+	 * Apparent closeness for same-size DECODE balls: larger max member {@code ta}
+	 * means nearer the camera. Not true range in inches.
+	 */
+	public static double apparentCloseness(BallGroup g) {
+		if (g == null) {
+			return 0.0;
+		}
+		BallDetection largest = g.getClosestOrLargest();
+		if (largest != null) {
+			return largest.getTargetArea();
+		}
+		return g.getTotalArea();
+	}
+
+	/**
+	 * True when {@code a} should beat {@code b} as the closer group.
+	 * Primary key is max member area; ties break on confidence, then smaller |tx|.
+	 */
+	public static boolean isCloser(BallGroup a, BallGroup b) {
+		if (a == null) {
+			return false;
+		}
+		if (b == null) {
+			return true;
+		}
+		double da = apparentCloseness(a);
+		double db = apparentCloseness(b);
+		if (da != db) {
+			return da > db;
+		}
+		if (a.getAverageConfidence() != b.getAverageConfidence()) {
+			return a.getAverageConfidence() > b.getAverageConfidence();
+		}
+		return Math.abs(a.getWeightedTxDeg()) < Math.abs(b.getWeightedTxDeg());
+	}
+
+	/** Closest group by apparent size ({@code ta}); optional colour filter. */
+	public static Optional<BallGroup> selectBestGroup(List<BallGroup> groups) {
+		return selectClosestGroup(groups, null);
+	}
+
+	/** Closest group by apparent size, preferring groups that contain {@code desiredColor}. */
 	public static Optional<BallGroup> selectBestGroup(List<BallGroup> groups, BallColor desiredColor) {
+		return selectClosestGroup(groups, desiredColor);
+	}
+
+	public static Optional<BallGroup> selectClosestGroup(List<BallGroup> groups, BallColor desiredColor) {
 		if (groups == null || groups.isEmpty()) {
 			return Optional.empty();
 		}
+		List<BallGroup> candidates = groups;
+		if (desiredColor == BallColor.GREEN || desiredColor == BallColor.PURPLE) {
+			List<BallGroup> matching = new ArrayList<>();
+			for (BallGroup g : groups) {
+				if (g == null) {
+					continue;
+				}
+				int count = desiredColor == BallColor.GREEN ? g.getGreenCount() : g.getPurpleCount();
+				if (count > 0) {
+					matching.add(g);
+				}
+			}
+			if (!matching.isEmpty()) {
+				candidates = matching;
+			}
+		}
 		BallGroup best = null;
-		double bestScore = Double.NEGATIVE_INFINITY;
-		for (BallGroup g : groups) {
-			BallGroup scored = desiredColor == null
-					? g
-					: buildGroup(g.getMembers(), desiredColor);
-			if (scored.getScore() > bestScore) {
-				bestScore = scored.getScore();
-				best = scored;
+		for (BallGroup g : candidates) {
+			if (g == null) {
+				continue;
+			}
+			if (isCloser(g, best)) {
+				best = g;
 			}
 		}
 		return Optional.ofNullable(best);
