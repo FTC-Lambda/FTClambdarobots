@@ -32,6 +32,17 @@ public final class Constants {
 	public static final double VISION_DISTANCE_HYSTERESIS_START_OFFSET = 0.5;
 	public static final double VISION_DISTANCE_HYSTERESIS_STOP_OFFSET  = 1.0;
 
+	public static final double BALL_ALIGN_TURN_KP = 0.040;
+	public static final double BALL_ALIGN_TURN_KI = 0.0;
+	public static final double BALL_ALIGN_TURN_KD = 0.003;
+	public static final double BALL_ALIGN_TURN_DERIVATIVE_FILTER = 0.20;
+	public static final double BALL_ALIGN_START_CORRECTION_DEG = 4.0;
+	public static final double BALL_ALIGN_STOP_CORRECTION_DEG = 2.0;
+	public static final double BALL_ALIGN_MAX_TURN_POWER = 0.65;
+	public static final double BALL_ALIGN_STATIC_FRICTION_POWER = 0.12;
+	public static final double BALL_ALIGN_TURN_SLEW_RATE = 6.0;
+	public static final long BALL_ALIGN_COMMAND_HOLD_MS = 100L;
+
 	// --- Vision tracking PID: interactive follow (Limelight Seek Tag) ---
 	public static final double VISION_SEEK_TURN_KP = 0.03;
 	public static final double VISION_SEEK_TURN_KI = 0.002;

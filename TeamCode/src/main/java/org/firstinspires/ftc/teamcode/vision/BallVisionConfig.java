@@ -82,4 +82,6 @@ public final class BallVisionConfig {
 	 * similarly sized piles from flipping the aimpoint every frame.
 	 */
 	public static final double CLOSEST_AREA_SWITCH_RATIO = 1.25;
+	public static final int BALL_TARGET_SWITCH_CONFIRM_FRAMES = 3;
+	public static final double BALL_TARGET_AIM_FILTER_GAIN = 0.50;
 }
