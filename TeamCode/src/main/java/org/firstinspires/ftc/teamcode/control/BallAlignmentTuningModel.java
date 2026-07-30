@@ -94,16 +94,24 @@ public final class BallAlignmentTuningModel {
 				alignmentConfig = alignmentConfig.withDerivativeFilter(alignmentConfig.getDerivativeFilter() + delta);
 				break;
 			case START_DEADBAND:
-				alignmentConfig = alignmentConfig.withStartCorrectionDeg(alignmentConfig.getStartCorrectionDeg() + delta);
+				alignmentConfig = alignmentConfig.withStartCorrectionDeg(Math.max(
+						alignmentConfig.getStopCorrectionDeg(),
+						alignmentConfig.getStartCorrectionDeg() + delta));
 				break;
 			case STOP_DEADBAND:
-				alignmentConfig = alignmentConfig.withStopCorrectionDeg(alignmentConfig.getStopCorrectionDeg() + delta);
+				alignmentConfig = alignmentConfig.withStopCorrectionDeg(Math.min(
+						alignmentConfig.getStartCorrectionDeg(),
+						alignmentConfig.getStopCorrectionDeg() + delta));
 				break;
 			case MAX_TURN_POWER:
-				alignmentConfig = alignmentConfig.withMaxTurnPower(alignmentConfig.getMaxTurnPower() + delta);
+				alignmentConfig = alignmentConfig.withMaxTurnPower(Math.max(
+						alignmentConfig.getStaticFrictionPower(),
+						alignmentConfig.getMaxTurnPower() + delta));
 				break;
 			case STATIC_FRICTION:
-				alignmentConfig = alignmentConfig.withStaticFrictionPower(alignmentConfig.getStaticFrictionPower() + delta);
+				alignmentConfig = alignmentConfig.withStaticFrictionPower(Math.min(
+						alignmentConfig.getMaxTurnPower(),
+						alignmentConfig.getStaticFrictionPower() + delta));
 				break;
 			case TURN_SLEW_RATE:
 				alignmentConfig = alignmentConfig.withTurnSlewRate(alignmentConfig.getTurnSlewRate() + delta);

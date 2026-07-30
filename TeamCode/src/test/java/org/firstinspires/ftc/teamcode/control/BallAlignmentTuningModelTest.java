@@ -72,6 +72,70 @@ public class BallAlignmentTuningModelTest {
 		assertEquals(Constants.BALL_ALIGN_TURN_KP - 0.008, m.getSelectedValue(), 1e-9);
 	}
 
+	@Test
+	public void decreasingStartDeadbandClampsSelectedValueWithoutChangingStopDeadband() {
+		BallAlignmentConfig initial = BallAlignmentConfig.defaults()
+				.withStartCorrectionDeg(3.25)
+				.withStopCorrectionDeg(3.0);
+		BallAlignmentTuningModel m = new BallAlignmentTuningModel(initial,
+				org.firstinspires.ftc.teamcode.vision.BallTargetingConfig.defaults());
+		select(m, BallAlignmentTuningModel.Parameter.START_DEADBAND);
+
+		m.adjust(-1, true);
+
+		assertEquals(3.0, m.getAlignmentConfig().getStartCorrectionDeg(), 1e-9);
+		assertOtherAlignmentValuesUnchanged(initial, m.getAlignmentConfig(),
+				BallAlignmentTuningModel.Parameter.START_DEADBAND);
+	}
+
+	@Test
+	public void increasingStopDeadbandClampsSelectedValueWithoutChangingStartDeadband() {
+		BallAlignmentConfig initial = BallAlignmentConfig.defaults()
+				.withStartCorrectionDeg(3.0)
+				.withStopCorrectionDeg(2.75);
+		BallAlignmentTuningModel m = new BallAlignmentTuningModel(initial,
+				org.firstinspires.ftc.teamcode.vision.BallTargetingConfig.defaults());
+		select(m, BallAlignmentTuningModel.Parameter.STOP_DEADBAND);
+
+		m.adjust(1, true);
+
+		assertEquals(3.0, m.getAlignmentConfig().getStopCorrectionDeg(), 1e-9);
+		assertOtherAlignmentValuesUnchanged(initial, m.getAlignmentConfig(),
+				BallAlignmentTuningModel.Parameter.STOP_DEADBAND);
+	}
+
+	@Test
+	public void decreasingMaxTurnPowerClampsSelectedValueWithoutChangingStaticFriction() {
+		BallAlignmentConfig initial = BallAlignmentConfig.defaults()
+				.withMaxTurnPower(0.20)
+				.withStaticFrictionPower(0.15);
+		BallAlignmentTuningModel m = new BallAlignmentTuningModel(initial,
+				org.firstinspires.ftc.teamcode.vision.BallTargetingConfig.defaults());
+		select(m, BallAlignmentTuningModel.Parameter.MAX_TURN_POWER);
+
+		m.adjust(-1, true);
+
+		assertEquals(0.15, m.getAlignmentConfig().getMaxTurnPower(), 1e-9);
+		assertOtherAlignmentValuesUnchanged(initial, m.getAlignmentConfig(),
+				BallAlignmentTuningModel.Parameter.MAX_TURN_POWER);
+	}
+
+	@Test
+	public void increasingStaticFrictionClampsSelectedValueWithoutChangingMaxTurnPower() {
+		BallAlignmentConfig initial = BallAlignmentConfig.defaults()
+				.withMaxTurnPower(0.20)
+				.withStaticFrictionPower(0.16);
+		BallAlignmentTuningModel m = new BallAlignmentTuningModel(initial,
+				org.firstinspires.ftc.teamcode.vision.BallTargetingConfig.defaults());
+		select(m, BallAlignmentTuningModel.Parameter.STATIC_FRICTION);
+
+		m.adjust(1, true);
+
+		assertEquals(0.20, m.getAlignmentConfig().getStaticFrictionPower(), 1e-9);
+		assertOtherAlignmentValuesUnchanged(initial, m.getAlignmentConfig(),
+				BallAlignmentTuningModel.Parameter.STATIC_FRICTION);
+	}
+
 	private static BallAlignmentTuningModel.ChangeDomain expectedDomain(
 			BallAlignmentTuningModel.Parameter parameter) {
 		switch (parameter) {
@@ -92,6 +156,47 @@ public class BallAlignmentTuningModelTest {
 		assertTrue(config.getMaxTurnPower() <= 1.0);
 		assertTrue(config.getStaticFrictionPower() <= config.getMaxTurnPower());
 		assertTrue(config.getCommandHoldMs() >= 1L);
+	}
+
+	private static void select(BallAlignmentTuningModel model,
+			BallAlignmentTuningModel.Parameter parameter) {
+		while (model.getSelectedParameter() != parameter) {
+			model.selectNext();
+		}
+	}
+
+	private static void assertOtherAlignmentValuesUnchanged(BallAlignmentConfig expected,
+			BallAlignmentConfig actual, BallAlignmentTuningModel.Parameter selected) {
+		if (selected != BallAlignmentTuningModel.Parameter.TURN_KP) {
+			assertEquals(expected.getTurnKp(), actual.getTurnKp(), 1e-9);
+		}
+		if (selected != BallAlignmentTuningModel.Parameter.TURN_KI) {
+			assertEquals(expected.getTurnKi(), actual.getTurnKi(), 1e-9);
+		}
+		if (selected != BallAlignmentTuningModel.Parameter.TURN_KD) {
+			assertEquals(expected.getTurnKd(), actual.getTurnKd(), 1e-9);
+		}
+		if (selected != BallAlignmentTuningModel.Parameter.DERIVATIVE_FILTER) {
+			assertEquals(expected.getDerivativeFilter(), actual.getDerivativeFilter(), 1e-9);
+		}
+		if (selected != BallAlignmentTuningModel.Parameter.START_DEADBAND) {
+			assertEquals(expected.getStartCorrectionDeg(), actual.getStartCorrectionDeg(), 1e-9);
+		}
+		if (selected != BallAlignmentTuningModel.Parameter.STOP_DEADBAND) {
+			assertEquals(expected.getStopCorrectionDeg(), actual.getStopCorrectionDeg(), 1e-9);
+		}
+		if (selected != BallAlignmentTuningModel.Parameter.MAX_TURN_POWER) {
+			assertEquals(expected.getMaxTurnPower(), actual.getMaxTurnPower(), 1e-9);
+		}
+		if (selected != BallAlignmentTuningModel.Parameter.STATIC_FRICTION) {
+			assertEquals(expected.getStaticFrictionPower(), actual.getStaticFrictionPower(), 1e-9);
+		}
+		if (selected != BallAlignmentTuningModel.Parameter.TURN_SLEW_RATE) {
+			assertEquals(expected.getTurnSlewRate(), actual.getTurnSlewRate(), 1e-9);
+		}
+		if (selected != BallAlignmentTuningModel.Parameter.COMMAND_HOLD_MS) {
+			assertEquals(expected.getCommandHoldMs(), actual.getCommandHoldMs());
+		}
 	}
 
 	private static void assertValid(org.firstinspires.ftc.teamcode.vision.BallTargetingConfig config) {
