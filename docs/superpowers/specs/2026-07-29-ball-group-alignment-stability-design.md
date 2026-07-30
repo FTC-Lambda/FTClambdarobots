@@ -12,6 +12,9 @@ Make `Ball-Grouping-Aligning test` rotate promptly toward the persisted ball gro
 - A repeated vision frame cannot keep the last nonzero command alive for more than 100 ms after the last fresh frame.
 - An invalid target, manual-mode transition, color-preference change, or OpMode shutdown immediately commands zero and clears all controller state.
 - PID, deadband, output limiting, target persistence, and telemetry all use the same persisted weighted horizontal error.
+- With multiple groups, acquisition prefers the greatest ball count, then apparent closeness, then confidence, then proximity to the camera center.
+- A different group cannot take an existing lock until it remains the preferred challenger for three consecutive fresh frames.
+- A one-frame change in a locked group's reported ball count or position neither changes target identity nor exposes the raw position jump directly to the controller.
 - Ball-specific tuning does not change AprilTag tracking behavior.
 
 ## Architecture
@@ -20,7 +23,7 @@ The feature keeps the existing perception-to-hardware flow but gives the control
 
 `Limelight detections -> BallGrouping -> TargetPersistence -> BallTarget -> BallAlignmentController -> Drivetrain`
 
-`LimelightVision` continues to own detection parsing, filtering, grouping, and target persistence. `BallTarget.getHorizontalErrorDeg()` becomes the only bearing consumed by alignment control. `BallGroupingAligningTest` remains the application and behavioral layer: it polls vision, handles the existing `MANUAL`/`ALIGN` state machine and color controls, passes targets to the controller, applies the returned turn command through `Drivetrain`, and publishes telemetry.
+`LimelightVision` continues to own detection parsing, filtering, grouping, target arbitration, and target persistence. `BallTarget.getHorizontalErrorDeg()` becomes the only bearing consumed by alignment control. `BallGroupingAligningTest` remains the application and behavioral layer: it polls vision, handles the existing `MANUAL`/`ALIGN` state machine and color controls, passes targets to the controller, applies the returned turn command through `Drivetrain`, and publishes telemetry.
 
 A new FTC-independent `BallAlignmentController` owns the control state. It composes the existing `PIDController` and `SlewRateLimiter` utilities but uses ball-specific configuration. It also owns correction hysteresis, fresh-frame command expiry, sign-reversal handling, and reset behavior. Keeping this class free of FTC SDK types allows deterministic local unit tests.
 
@@ -38,6 +41,8 @@ Add descriptive constants without changing the existing `VISION_SEEK_*` values u
 - `BALL_ALIGN_STATIC_FRICTION_POWER = 0.12`
 - `BALL_ALIGN_TURN_SLEW_RATE = 6.0` power units per second
 - `BALL_ALIGN_COMMAND_HOLD_MS = 100`
+- `BALL_TARGET_SWITCH_CONFIRM_FRAMES = 3`
+- `BALL_TARGET_AIM_FILTER_GAIN = 0.50`
 
 These are safe initial field-tuning values, not universal drivetrain calibration. The final on-robot procedure changes only these ball-alignment constants if the measured drivetrain breakaway power or response requires adjustment.
 
@@ -69,6 +74,37 @@ An invalid target returns zero immediately rather than slewing down. It also cle
 
 All elapsed-time inputs are sanitized. Non-finite, negative, or near-zero loop intervals produce a safe zero step or reset rather than an unbounded derivative or slew calculation.
 
+## Multi-Group Arbitration
+
+### Initial acquisition
+
+After applying the requested color filter, target acquisition ranks groups lexicographically:
+
+1. greater ball count;
+2. greater apparent closeness, measured by the largest member's target area;
+3. greater average confidence;
+4. smaller absolute weighted horizontal error.
+
+This means a three-ball group is preferred over a nearer two-ball group. Apparent closeness decides only when ball counts match. The existing desired-color behavior remains an eligibility filter: when at least one group contains the desired color, groups without that color are excluded; when no group contains it, acquisition falls back to all groups.
+
+### Maintaining a lock
+
+Every fresh frame first searches for groups inside the existing weighted `tx`/`ty` association gate. If more than one group is inside the gate, the group with the smallest angular distance from the previous lock is the current observation; apparent closeness, confidence, and center proximity break exact distance ties in that order. Other groups remain eligible challengers rather than silently replacing the lock. The selected current observation remains the current target even if its detected member count changes. Its current raw group is retained for diagnostics, while the `BallTarget` aimpoint is updated with an exponential filter:
+
+`filteredAim = previousFilteredAim + 0.50 * (rawWeightedAim - previousFilteredAim)`
+
+The filter is seeded directly from the first observation after acquisition or a confirmed switch. It smooths one-frame membership and detector-position jumps without blending the positions of two different locks.
+
+### Challenging a lock
+
+Any group not chosen as the current observation becomes a challenger only when it outranks that observation using the acquisition ordering. When ball counts tie, it must also exceed the current group's apparent closeness by the existing `CLOSEST_AREA_SWITCH_RATIO` of 1.25. A challenger must remain associated with the pending challenger and remain preferred for three consecutive fresh frames before it replaces the lock.
+
+If challenger identity changes, it stops outranking the current group, or the current group regains priority, the confirmation count resets. Candidate ball-count fluctuations do not reset confirmation as long as the candidate remains associated and preferred.
+
+If no current observation is associated in a fresh frame, the best acquisition-ranked group may still enter the same three-frame confirmation process. Until confirmation completes, persistence retains the previous filtered aimpoint as held rather than marking the challenger fresh. The alignment controller's 100 ms command timeout therefore stops motion while identity is uncertain. If no challenger completes confirmation before the normal 350 ms vision-loss timeout, the lock clears.
+
+On the third consecutive confirming frame, the challenger becomes the lock, aimpoint filtering is reseeded from that group's weighted center, and the new target is marked fresh.
+
 ## Component Responsibilities
 
 ### `BallAlignmentController`
@@ -89,9 +125,10 @@ All elapsed-time inputs are sanitized. Non-finite, negative, or near-zero loop i
 ### Existing vision classes
 
 - `BallGrouping` continues grouping detections using spatial adjacency and the horizontal span cap.
-- `TargetPersistence` continues associating the current group and publishing the current frame's weighted aimpoint.
-- New regression tests cover membership changes, association boundaries, area-ratio switching, and weighted-aimpoint consistency.
-- No grouping threshold or selection algorithm changes are included unless a deterministic regression test first demonstrates that the current implementation violates these documented rules.
+- `BallGrouping` exposes one deterministic comparator for acquisition ordering: ball count, apparent closeness, confidence, then center proximity.
+- `TargetPersistence` owns the locked group, pending challenger identity/count, three-frame confirmation, and filtered weighted aimpoint.
+- New regression tests cover membership changes, association boundaries, initial ranking, challenger confirmation/reset, missing-lock behavior, area-ratio switching, and filtered weighted-aimpoint consistency.
+- Grouping proximity thresholds are unchanged; this work changes arbitration and persistence after groups have already been formed.
 
 ## Telemetry
 
@@ -100,7 +137,10 @@ The alignment OpMode reports:
 - controller action/reason;
 - target state: fresh, held with age, or invalid;
 - canonical weighted bearing used by control;
+- raw and filtered locked-group bearings;
 - group arithmetic mean as diagnostic data only;
+- locked and pending group sizes;
+- challenger confirmation count out of three;
 - correction active/centered state;
 - PID P/I/D terms;
 - raw PID, requested, and final applied turn commands;
@@ -133,8 +173,15 @@ Pure-Java tests will verify:
 - a sign reversal produces zero and requires a confirming fresh frame;
 - controller state does not survive mode or color resets;
 - grouping remains bounded by maximum span;
-- persistence retains an associated group unless the closest alternative exceeds the configured area switch ratio;
-- the controller consumes the weighted persisted bearing when arithmetic and weighted group centers differ.
+- initial acquisition chooses greater ball count before apparent closeness;
+- equal-count acquisition chooses greater apparent closeness before confidence and center proximity;
+- persistence retains an associated group through one-frame member-count and position changes;
+- a challenger cannot switch the lock before three consecutive confirming fresh frames;
+- challenger identity or priority loss resets its confirmation count;
+- an equal-count challenger must exceed the configured area switch ratio;
+- a missing current observation holds the old target while a challenger confirms and does not authorize motion beyond 100 ms;
+- filtered aimpoint state resets rather than blending two different group identities;
+- the controller consumes the filtered persisted weighted bearing when arithmetic, raw weighted, and filtered centers differ.
 
 ### Repository verification
 
@@ -148,7 +195,10 @@ Run the focused vision/control unit tests, the complete TeamCode unit-test suite
 4. Increase `BALL_ALIGN_TURN_KD` in small increments only if proportional control overshoots despite correct deadband and command expiry.
 5. Verify that a centered stationary target produces sustained zero output despite detector jitter.
 6. Occlude the target and verify that commanded motion begins decaying after 100 ms and reaches immediate zero when the target becomes invalid.
-7. Present two similarly sized groups and verify persistence does not alternate targets frame to frame.
+7. Present groups with different member counts and verify the greater-count group wins acquisition even when the smaller group appears closer.
+8. Present two equal-count groups and verify the apparently closer group wins acquisition.
+9. Temporarily change a locked group's detected count or position and verify the lock remains stable.
+10. Make a challenger preferable for fewer than three frames and verify it cannot steal the lock; sustain its advantage for three fresh frames and verify one deliberate switch.
 
 ## Out of Scope
 
