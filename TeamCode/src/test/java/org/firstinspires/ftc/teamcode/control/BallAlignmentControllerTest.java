@@ -76,6 +76,44 @@ public class BallAlignmentControllerTest {
 	}
 
 	@Test
+	public void zeroFreshRequestDoesNotConfirmPendingReversal() {
+		BallAlignmentConfig config = BallAlignmentConfig.defaults()
+				.withTurnKp(0.125)
+				.withTurnKi(1.0)
+				.withTurnKd(0.0);
+		BallAlignmentController c = new BallAlignmentController(config);
+		assertTrue(c.update(target(8.0, true, 0), 1000, 0.125).getAppliedTurn() > 0);
+		assertEquals(BallAlignmentController.Action.REVERSAL_GUARD,
+				c.update(target(-16.0, true, 0), 1125, 0.125).getAction());
+
+		BallAlignmentController.Result zero =
+				c.update(target(4.0, true, 0), 1250, 0.125);
+
+		assertEquals(0.0, zero.getRequestedTurn(), 1e-9);
+		assertEquals(0.0, zero.getAppliedTurn(), 1e-9);
+		assertEquals(BallAlignmentController.Action.REVERSAL_GUARD, zero.getAction());
+		assertTrue(c.update(target(-8.0, true, 0), 1375, 0.125).getAppliedTurn() < 0);
+	}
+
+	@Test
+	public void returnToOriginalSignCancelsPendingReversal() {
+		BallAlignmentController c = new BallAlignmentController(BallAlignmentConfig.defaults());
+		assertTrue(c.update(target(12.0, true, 0), 1000, 0.02).getAppliedTurn() > 0);
+		assertEquals(BallAlignmentController.Action.REVERSAL_GUARD,
+				c.update(target(-12.0, true, 0), 1050, 0.02).getAction());
+
+		BallAlignmentController.Result resumed =
+				c.update(target(12.0, true, 0), 1100, 0.02);
+
+		assertEquals(BallAlignmentController.Action.CORRECTING, resumed.getAction());
+		assertTrue(resumed.getAppliedTurn() > 0);
+		BallAlignmentController.Result guardedAgain =
+				c.update(target(-12.0, true, 0), 1150, 0.02);
+		assertEquals(BallAlignmentController.Action.REVERSAL_GUARD, guardedAgain.getAction());
+		assertEquals(0.0, guardedAgain.getAppliedTurn(), 1e-9);
+	}
+
+	@Test
 	public void outputIsClampedAndFirstMotionIsSlewLimitedFromZero() {
 		BallAlignmentController c = new BallAlignmentController(BallAlignmentConfig.defaults());
 

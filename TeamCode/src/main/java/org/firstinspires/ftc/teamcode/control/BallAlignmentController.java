@@ -157,7 +157,15 @@ public final class BallAlignmentController {
 
 		int requestSign = sign(request);
 		if (pendingReverseSign != 0) {
-			pendingReverseSign = 0;
+			if (requestSign == pendingReverseSign) {
+				pendingReverseSign = 0;
+			} else if (requestSign == 0) {
+				appliedTurn = 0.0;
+				return result(bearing, false, Action.REVERSAL_GUARD);
+			} else {
+				// Returning to the original direction cancels the pending reversal.
+				pendingReverseSign = 0;
+			}
 		} else if (requestSign != 0 && sign(appliedTurn) != 0
 				&& requestSign != sign(appliedTurn)) {
 			pendingReverseSign = requestSign;
