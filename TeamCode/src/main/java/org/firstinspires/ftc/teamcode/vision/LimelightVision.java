@@ -21,7 +21,8 @@ import java.util.Optional;
 public class LimelightVision {
 
 	private final Limelight3A limelight;
-	private final TargetPersistence persistence = new TargetPersistence();
+	private BallTargetingConfig targetingConfig = BallTargetingConfig.defaults();
+	private final TargetPersistence persistence = new TargetPersistence(targetingConfig);
 
 	private int requestedPipeline = BallVisionConfig.PIPELINE_APRILTAG;
 	private boolean started;
@@ -106,6 +107,29 @@ public class LimelightVision {
 
 	public void setDesiredBallColor(BallColor color) {
 		persistence.setDesiredColor(color);
+	}
+
+	/** Replaces runtime target selection tuning and clears any prior lock. */
+	public void setBallTargetingConfig(BallTargetingConfig config) {
+		targetingConfig = config == null ? BallTargetingConfig.defaults() : config;
+		persistence.setConfig(targetingConfig);
+		target = BallTarget.none();
+	}
+
+	public BallTargetingConfig getBallTargetingConfig() {
+		return targetingConfig;
+	}
+
+	public Optional<BallGroup> getPendingBallGroup() {
+		return persistence.getPendingGroup();
+	}
+
+	public int getPendingBallConfirmationFrames() {
+		return persistence.getPendingConfirmationFrames();
+	}
+
+	public double getRawLockedTxDeg() {
+		return persistence.getRawLockedTxDeg();
 	}
 
 	public void setDebugTelemetry(boolean enabled) {
@@ -234,6 +258,16 @@ public class LimelightVision {
 			} else {
 				telemetry.addData("Target", "none");
 			}
+			Optional<BallGroup> locked = persistence.getStickyGroup();
+			Optional<BallGroup> pending = persistence.getPendingGroup();
+			telemetry.addData("Target bearing raw/filt", "%.1f / %.1f",
+					persistence.getRawLockedTxDeg(), t.getHorizontalErrorDeg());
+			telemetry.addData("Target lock/pending", "%d / %d",
+					locked.isPresent() ? locked.get().getSize() : 0,
+					pending.isPresent() ? pending.get().getSize() : 0);
+			telemetry.addData("Target confirm", "%d / %d",
+					persistence.getPendingConfirmationFrames(),
+					targetingConfig.getSwitchConfirmFrames());
 		}
 		if (debugTelemetry) {
 			// Walk the raw list, not the filtered one, so a rejected detection still shows the
