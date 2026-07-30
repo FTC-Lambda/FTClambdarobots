@@ -24,7 +24,7 @@ public final class BallAlignmentConfig {
 		this.turnKp = nonNegative(turnKp);
 		this.turnKi = nonNegative(turnKi);
 		this.turnKd = nonNegative(turnKd);
-		this.derivativeFilter = nonNegative(derivativeFilter);
+		this.derivativeFilter = clamp(finiteOr(derivativeFilter, 0.0), 0.0, 1.0);
 		this.startCorrectionDeg = Math.max(MIN_CORRECTION_DEG, finiteOr(startCorrectionDeg, MIN_CORRECTION_DEG));
 		this.stopCorrectionDeg = clamp(finiteOr(stopCorrectionDeg, MIN_CORRECTION_DEG),
 				MIN_CORRECTION_DEG, this.startCorrectionDeg);

@@ -29,4 +29,18 @@ public class BallAlignmentConfigTest {
 		assertTrue(c.getTurnKp() >= 0.0);
 		assertTrue(c.getTurnSlewRate() >= 0.0);
 	}
+
+	@Test
+	public void derivativeFilterClampsBelowZero() {
+		BallAlignmentConfig c = BallAlignmentConfig.defaults().withDerivativeFilter(-0.25);
+
+		assertEquals(0.0, c.getDerivativeFilter(), 1e-9);
+	}
+
+	@Test
+	public void derivativeFilterClampsAboveOne() {
+		BallAlignmentConfig c = BallAlignmentConfig.defaults().withDerivativeFilter(1.25);
+
+		assertEquals(1.0, c.getDerivativeFilter(), 1e-9);
+	}
 }

@@ -136,6 +136,18 @@ public class BallAlignmentTuningModelTest {
 				BallAlignmentTuningModel.Parameter.STATIC_FRICTION);
 	}
 
+	@Test
+	public void repeatedCoarseDerivativeFilterAdjustmentCannotExceedOne() {
+		BallAlignmentTuningModel m = new BallAlignmentTuningModel();
+		select(m, BallAlignmentTuningModel.Parameter.DERIVATIVE_FILTER);
+
+		for (int i = 0; i < 20; i++) {
+			m.adjust(1, true);
+		}
+
+		assertEquals(1.0, m.getAlignmentConfig().getDerivativeFilter(), 1e-9);
+	}
+
 	private static BallAlignmentTuningModel.ChangeDomain expectedDomain(
 			BallAlignmentTuningModel.Parameter parameter) {
 		switch (parameter) {
@@ -152,6 +164,7 @@ public class BallAlignmentTuningModelTest {
 		assertTrue(config.getTurnKi() >= 0.0);
 		assertTrue(config.getTurnKd() >= 0.0);
 		assertTrue(config.getDerivativeFilter() >= 0.0);
+		assertTrue(config.getDerivativeFilter() <= 1.0);
 		assertTrue(config.getStopCorrectionDeg() <= config.getStartCorrectionDeg());
 		assertTrue(config.getMaxTurnPower() <= 1.0);
 		assertTrue(config.getStaticFrictionPower() <= config.getMaxTurnPower());

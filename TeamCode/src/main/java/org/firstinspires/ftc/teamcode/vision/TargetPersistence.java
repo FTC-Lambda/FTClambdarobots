@@ -105,8 +105,9 @@ public final class TargetPersistence {
 	 * Other groups may challenge that lock, but promotion requires consecutive fresh frames.
 	 */
 	private BallTarget processFreshFrame(long nowHubMs, List<BallGroup> freshGroups) {
+		boolean enforceDesiredColor = hasDesiredColorGroup(freshGroups);
 		if (stickyGroup == null) {
-			BallGroup acquired = selectBestGroup(freshGroups, null);
+			BallGroup acquired = selectBestGroup(freshGroups, null, enforceDesiredColor);
 			if (acquired == null) {
 				clearPending();
 				return null;
@@ -118,8 +119,10 @@ public final class TargetPersistence {
 			return toTarget(stickyGroup, true, 0L);
 		}
 
-		BallGroup currentObservation = selectCurrentObservation(freshGroups);
-		BallGroup challenger = selectBestGroup(freshGroups, currentObservation);
+		BallGroup currentObservation =
+				selectCurrentObservation(freshGroups, enforceDesiredColor);
+		BallGroup challenger =
+				selectBestGroup(freshGroups, currentObservation, enforceDesiredColor);
 
 		if (currentObservation != null) {
 			stickyGroup = currentObservation;
@@ -144,18 +147,22 @@ public final class TargetPersistence {
 		return null;
 	}
 
-	private BallGroup selectCurrentObservation(List<BallGroup> freshGroups) {
+	private BallGroup selectCurrentObservation(
+			List<BallGroup> freshGroups, boolean enforceDesiredColor) {
 		BallGroup best = null;
 		double bestDistance = Double.POSITIVE_INFINITY;
 		if (freshGroups == null) {
 			return null;
 		}
 		for (BallGroup group : freshGroups) {
-			if (!isEligible(group) || !areAssociated(stickyGroup, group)) {
+			if (!isEligible(group, enforceDesiredColor)
+					|| !areAssociated(stickyGroup, group)) {
 				continue;
 			}
 			double distance = angularDistance(stickyGroup, group);
-			if (distance < bestDistance) {
+			if (distance < bestDistance
+					|| (Double.compare(distance, bestDistance) == 0
+							&& BallGrouping.isCloser(group, best))) {
 				best = group;
 				bestDistance = distance;
 			}
@@ -163,13 +170,14 @@ public final class TargetPersistence {
 		return best;
 	}
 
-	private BallGroup selectBestGroup(List<BallGroup> freshGroups, BallGroup excluded) {
+	private BallGroup selectBestGroup(
+			List<BallGroup> freshGroups, BallGroup excluded, boolean enforceDesiredColor) {
 		BallGroup best = null;
 		if (freshGroups == null) {
 			return null;
 		}
 		for (BallGroup group : freshGroups) {
-			if (group == excluded || !isEligible(group)) {
+			if (group == excluded || !isEligible(group, enforceDesiredColor)) {
 				continue;
 			}
 			if (BallGrouping.isHigherPriority(group, best)) {
@@ -179,9 +187,24 @@ public final class TargetPersistence {
 		return best;
 	}
 
-	private boolean isEligible(BallGroup group) {
+	private boolean hasDesiredColorGroup(List<BallGroup> freshGroups) {
+		if (desiredColor == null || freshGroups == null) {
+			return false;
+		}
+		for (BallGroup group : freshGroups) {
+			if (isEligible(group, true)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean isEligible(BallGroup group, boolean enforceDesiredColor) {
 		if (group == null) {
 			return false;
+		}
+		if (!enforceDesiredColor) {
+			return true;
 		}
 		if (desiredColor == BallColor.GREEN) {
 			return group.getGreenCount() > 0;

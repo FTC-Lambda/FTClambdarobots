@@ -15,10 +15,15 @@ import static org.junit.Assert.assertTrue;
 public class TargetPersistenceTest {
 
 	private static BallGroup group(double tx, double ty, int size, double area) {
+		return group(tx, ty, size, area, 0.8, "green");
+	}
+
+	private static BallGroup group(double tx, double ty, int size, double area,
+			double confidence, String className) {
 		List<BallDetection> members = new ArrayList<>();
 		for (int i = 0; i < size; i++) {
 			members.add(new BallDetection(
-					"green", 0.8, tx, ty, area, Collections.emptyList(),
+					className, confidence, tx, ty, area, Collections.emptyList(),
 					1.0, 1000L + i, 160 + i, 120, 40, 40, true));
 		}
 		return BallGrouping.buildGroup(members, null);
@@ -147,11 +152,90 @@ public class TargetPersistenceTest {
 	}
 
 	@Test
+	public void desiredColorFallsBackToVisibleGroupsDuringInitialAcquisition() {
+		TargetPersistence p = new TargetPersistence();
+		p.setDesiredColor(BallColor.PURPLE);
+
+		BallTarget target = p.update(1000, 1.0,
+				Arrays.asList(group(7, 0, 1, 0.02, 0.8, "green")));
+
+		assertTrue(target.isValid());
+		assertTrue(target.isFresh());
+		assertEquals(7.0, target.getHorizontalErrorDeg(), 1e-6);
+		assertEquals(1, p.getStickyGroup().get().getGreenCount());
+	}
+
+	@Test
+	public void desiredColorFallsBackToNonmatchingReassociationWhenUnavailable() {
+		TargetPersistence p = new TargetPersistence(
+				BallTargetingConfig.defaults().withAimFilterGain(1.0));
+		p.setDesiredColor(BallColor.PURPLE);
+		p.update(1000, 1.0,
+				Arrays.asList(group(4, 0, 1, 0.02, 0.8, "purple")));
+
+		BallTarget target = p.update(1050, 2.0,
+				Arrays.asList(group(7, 0, 1, 0.02, 0.8, "green")));
+
+		assertTrue(target.isFresh());
+		assertEquals(7.0, target.getHorizontalErrorDeg(), 1e-6);
+		assertEquals(1, p.getStickyGroup().get().getGreenCount());
+	}
+
+	@Test
+	public void equalDistanceAssociationPrefersApparentClosenessInEitherInputOrder() {
+		BallGroup closer = group(-5, 0, 1, 0.0625, 0.75, "green");
+		BallGroup moreBalls = group(5, 0, 3, 0.03125, 0.75, "green");
+
+		assertAssociationWinnerIndependentOfOrder(closer, moreBalls, -5.0);
+	}
+
+	@Test
+	public void equalDistanceAndClosenessAssociationPrefersConfidenceInEitherInputOrder() {
+		BallGroup higherConfidence = group(-5, 0, 1, 0.03125, 0.875, "green");
+		BallGroup lowerConfidence = group(5, 0, 3, 0.03125, 0.75, "green");
+
+		assertAssociationWinnerIndependentOfOrder(higherConfidence, lowerConfidence, -5.0);
+	}
+
+	@Test
+	public void fullyTiedAssociationPrefersSmallerAbsoluteTxInEitherInputOrder() {
+		BallGroup centered = group(0, 0, 1, 0.03125, 0.75, "green");
+		BallGroup offCenter = group(10, 0, 3, 0.03125, 0.75, "green");
+
+		assertAssociationWinnerIndependentOfOrder(
+				group(5, 0, 1), centered, offCenter, 0.0);
+	}
+
+	@Test
 	public void doesNotReuseSameFrameAsNewDetection() {
 		TargetPersistence p = new TargetPersistence();
 		p.update(1000L, 5.0, Optional.of(group(0, 0, 1)));
 		BallTarget again = p.update(1050L, 5.0, Optional.of(group(1, 0, 1)));
 		assertTrue(again.isValid());
 		assertFalse(again.isFresh());
+	}
+
+	private static void assertAssociationWinnerIndependentOfOrder(
+			BallGroup first, BallGroup second, double expectedTx) {
+		assertAssociationWinnerIndependentOfOrder(group(0, 0, 1), first, second, expectedTx);
+	}
+
+	private static void assertAssociationWinnerIndependentOfOrder(
+			BallGroup initial, BallGroup first, BallGroup second, double expectedTx) {
+		TargetPersistence forward = new TargetPersistence(
+				BallTargetingConfig.defaults().withAimFilterGain(1.0));
+		forward.update(1000, 1.0, Arrays.asList(initial));
+		assertEquals(expectedTx,
+				forward.update(1050, 2.0, Arrays.asList(first, second))
+						.getHorizontalErrorDeg(),
+				1e-6);
+
+		TargetPersistence reversed = new TargetPersistence(
+				BallTargetingConfig.defaults().withAimFilterGain(1.0));
+		reversed.update(1000, 1.0, Arrays.asList(initial));
+		assertEquals(expectedTx,
+				reversed.update(1050, 2.0, Arrays.asList(second, first))
+						.getHorizontalErrorDeg(),
+				1e-6);
 	}
 }

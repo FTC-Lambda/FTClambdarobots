@@ -68,30 +68,40 @@ public class BallGroupingAligningTest extends LinearOpMode {
 			while (opModeIsActive()) {
 				double loopDt = loopTimer.seconds();
 				loopTimer.reset();
+				long nowMs = System.currentTimeMillis();
+				boolean forceZeroThisLoop = false;
 
 				boolean bumper = gamepad1.left_bumper || gamepad1.right_bumper;
 				if (gamepad1.x && !prevX) {
 					desiredColor = BallColor.GREEN;
 					vision.setDesiredBallColor(desiredColor);
 					alignment.reset();
+					drivetrain.driveRaw(0.0, 0.0, 0.0);
+					forceZeroThisLoop = true;
 				} else if (gamepad1.y && !prevY) {
 					desiredColor = BallColor.PURPLE;
 					vision.setDesiredBallColor(desiredColor);
 					alignment.reset();
+					drivetrain.driveRaw(0.0, 0.0, 0.0);
+					forceZeroThisLoop = true;
 				} else if (bumper && !prevBumper) {
 					desiredColor = null;
 					vision.setDesiredBallColor(null);
 					alignment.reset();
+					drivetrain.driveRaw(0.0, 0.0, 0.0);
+					forceZeroThisLoop = true;
 				}
 
 				if (gamepad1.b && !prevB) {
 					mode = Mode.MANUAL;
 					alignment.reset();
-					alignmentResult = alignment.update(
-							BallTarget.none(), System.currentTimeMillis(), loopDt);
+					drivetrain.driveRaw(0.0, 0.0, 0.0);
+					forceZeroThisLoop = true;
 				} else if (gamepad1.a && !prevA && mode == Mode.MANUAL) {
 					mode = Mode.ALIGN;
 					alignment.reset();
+					drivetrain.driveRaw(0.0, 0.0, 0.0);
+					forceZeroThisLoop = true;
 				}
 
 				prevA = gamepad1.a;
@@ -105,7 +115,12 @@ public class BallGroupingAligningTest extends LinearOpMode {
 				BallGroup selectedGroup = vision.getPersistedGroup().orElse(null);
 				String action;
 
-				if (mode == Mode.MANUAL) {
+				if (forceZeroThisLoop) {
+					alignmentResult = alignment.update(BallTarget.none(), nowMs, loopDt);
+					action = mode == Mode.MANUAL
+							? "MANUAL — transition stopped"
+							: "ALIGN — transition stopped";
+				} else if (mode == Mode.MANUAL) {
 					drivetrain.drive(
 							gamepad1.left_stick_y,
 							gamepad1.left_stick_x,
@@ -114,7 +129,7 @@ public class BallGroupingAligningTest extends LinearOpMode {
 				} else {
 					// The controller owns fresh/held target handling and commands an immediate zero
 					// through its invalid-target path, so this test never searches blindly.
-					alignmentResult = alignment.update(target, System.currentTimeMillis(), loopDt);
+					alignmentResult = alignment.update(target, nowMs, loopDt);
 					drivetrain.driveRaw(0.0, 0.0, alignmentResult.getAppliedTurn());
 					action = "ALIGN — " + alignmentResult.getAction();
 				}
