@@ -4,25 +4,23 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
+import org.firstinspires.ftc.teamcode.control.BallAlignmentConfig;
+import org.firstinspires.ftc.teamcode.control.BallAlignmentController;
 import org.firstinspires.ftc.teamcode.hardware.RobotHardware;
 import org.firstinspires.ftc.teamcode.subsystems.Drivetrain;
-import org.firstinspires.ftc.teamcode.util.Constants;
-import org.firstinspires.ftc.teamcode.util.PIDController;
-import org.firstinspires.ftc.teamcode.util.SlewRateLimiter;
-import org.firstinspires.ftc.teamcode.util.VisionDeadband;
 import org.firstinspires.ftc.teamcode.vision.BallColor;
 import org.firstinspires.ftc.teamcode.vision.BallGroup;
 import org.firstinspires.ftc.teamcode.vision.BallTarget;
 import org.firstinspires.ftc.teamcode.vision.LimelightVision;
 
 /**
- * On-robot test for turning toward the selected ball group's horizontal center.
+ * On-robot test for turning toward the selected ball target's horizontal center.
  *
- * <p>The vision subsystem selects and briefly persists the best group. This test defines the
- * group's middle as the arithmetic mean of its members' horizontal angles; telemetry also
- * reports the confidence-and-area-weighted aimpoint exposed by {@link BallTarget}. This
- * OpMode deliberately commands rotation only: ball area is not a calibrated range, so it
- * cannot safely provide AprilTag-style approach or standoff control.</p>
+ * <p>The vision subsystem selects and briefly persists the best group. {@link BallTarget}'s
+ * confidence-and-area-weighted horizontal error is the sole control bearing; the selected
+ * group's arithmetic mean is reported only as a diagnostic. This OpMode deliberately commands
+ * rotation only: ball area is not a calibrated range, so it cannot safely provide AprilTag-style
+ * approach or standoff control.</p>
  *
  * <p>Controls:</p>
  * <ul>
@@ -36,9 +34,6 @@ import org.firstinspires.ftc.teamcode.vision.LimelightVision;
 @TeleOp(name = "Ball-Grouping-Aligning test", group = "Test")
 public class BallGroupingAligningTest extends LinearOpMode {
 
-	private static final double MAX_TURN_POWER = 0.35;
-	private static final double TURN_MIN_POWER = 0.20;
-
 	private enum Mode { MANUAL, ALIGN }
 
 	@Override
@@ -51,17 +46,11 @@ public class BallGroupingAligningTest extends LinearOpMode {
 		vision.useBallDetectionPipeline();
 		vision.start();
 
-		PIDController turnPid = new PIDController(
-				Constants.VISION_SEEK_TURN_KP,
-				Constants.VISION_SEEK_TURN_KI,
-				Constants.VISION_SEEK_TURN_KD,
-				Constants.VISION_SEEK_TURN_INTEGRAL_LIMIT,
-				Constants.VISION_SEEK_TURN_INTEGRAL_ZONE_DEG,
-				Constants.VISION_TURN_DERIVATIVE_FILTER);
-		SlewRateLimiter turnSlew = new SlewRateLimiter(Constants.VISION_TURN_SLEW_RATE);
-		VisionDeadband deadband = new VisionDeadband();
+		BallAlignmentController alignment = new BallAlignmentController(BallAlignmentConfig.defaults());
+		BallAlignmentController.Result alignmentResult =
+				alignment.update(BallTarget.none(), System.currentTimeMillis(), 0.0);
 
-		telemetry.addLine("Ball group alignment ready — press START");
+		telemetry.addLine("Ball group alignment ready - press START");
 		telemetry.addLine("X=ALIGN  O=MANUAL  Square=green  Triangle=purple  l1/r1=any color");
 		telemetry.update();
 		waitForStart();
@@ -73,13 +62,7 @@ public class BallGroupingAligningTest extends LinearOpMode {
 		boolean prevX = false;
 		boolean prevY = false;
 		boolean prevBumper = false;
-		double requestedTurn = 0.0;
-		double smoothedTurn = 0.0;
 		ElapsedTime loopTimer = new ElapsedTime();
-		ElapsedTime freshFrameTimer = new ElapsedTime();
-
-		// Seed the limiter at stopped so the first ALIGN command ramps up from zero.
-		turnSlew.calculate(0.0, 0.0);
 
 		try {
 			while (opModeIsActive()) {
@@ -90,40 +73,23 @@ public class BallGroupingAligningTest extends LinearOpMode {
 				if (gamepad1.x && !prevX) {
 					desiredColor = BallColor.GREEN;
 					vision.setDesiredBallColor(desiredColor);
-					requestedTurn = 0.0;
-					turnPid.reset();
-					deadband.clearState();
+					alignment.reset();
 				} else if (gamepad1.y && !prevY) {
 					desiredColor = BallColor.PURPLE;
 					vision.setDesiredBallColor(desiredColor);
-					requestedTurn = 0.0;
-					turnPid.reset();
-					deadband.clearState();
+					alignment.reset();
 				} else if (bumper && !prevBumper) {
 					desiredColor = null;
 					vision.setDesiredBallColor(null);
-					requestedTurn = 0.0;
-					turnPid.reset();
-					deadband.clearState();
+					alignment.reset();
 				}
 
 				if (gamepad1.b && !prevB) {
 					mode = Mode.MANUAL;
-					requestedTurn = 0.0;
-					smoothedTurn = 0.0;
-					turnPid.reset();
-					turnSlew.reset();
-					turnSlew.calculate(0.0, loopDt);
-					deadband.clearState();
+					alignment.reset();
 				} else if (gamepad1.a && !prevA && mode == Mode.MANUAL) {
 					mode = Mode.ALIGN;
-					requestedTurn = 0.0;
-					smoothedTurn = 0.0;
-					turnPid.reset();
-					turnSlew.reset();
-					turnSlew.calculate(0.0, loopDt);
-					deadband.clearState();
-					freshFrameTimer.reset();
+					alignment.reset();
 				}
 
 				prevA = gamepad1.a;
@@ -142,42 +108,13 @@ public class BallGroupingAligningTest extends LinearOpMode {
 							gamepad1.left_stick_y,
 							gamepad1.left_stick_x,
 							gamepad1.right_stick_x);
-					action = "MANUAL — press Cross / A to align";
-				} else if (target.isValid() && selectedGroup != null) {
-					double bearing = selectedGroup.getAverageTxDeg();
-
-					// Neural frames can repeat between control loops. Update PID only for a fresh
-					// measurement, then hold that request while persistence bridges the short gap.
-					if (target.isFresh()) {
-						double measurementDt = freshFrameTimer.seconds();
-						freshFrameTimer.reset();
-						double turnOut = turnPid.calculate(bearing, 0.0, measurementDt);
-						if (deadband.shouldCorrectTurn(bearing)) {
-							requestedTurn = clamp(turnOut, -MAX_TURN_POWER, MAX_TURN_POWER);
-							if (Math.abs(requestedTurn) < TURN_MIN_POWER) {
-								requestedTurn = Math.copySign(TURN_MIN_POWER, bearing);
-							}
-						} else {
-							requestedTurn = 0.0;
-						}
-					}
-
-					smoothedTurn = turnSlew.calculate(requestedTurn, loopDt);
-					drivetrain.driveRaw(0.0, 0.0, smoothedTurn);
-					action = deadband.isBearingCentered(bearing)
-							? "ALIGN — group centered"
-							: (target.isFresh() ? "ALIGN — correcting" : "ALIGN — holding last frame");
+					action = "MANUAL - press Cross / A to align";
 				} else {
-					// Never search blindly in this test; stop until a group is visible again.
-					requestedTurn = 0.0;
-					smoothedTurn = 0.0;
-					drivetrain.driveRaw(0.0, 0.0, 0.0);
-					turnPid.reset();
-					turnSlew.reset();
-					turnSlew.calculate(0.0, loopDt);
-					deadband.clearState();
-					freshFrameTimer.reset();
-					action = "ALIGN — waiting for a ball group";
+					// The controller owns fresh/held target handling and commands an immediate zero
+					// through its invalid-target path, so this test never searches blindly.
+					alignmentResult = alignment.update(target, System.currentTimeMillis(), loopDt);
+					drivetrain.driveRaw(0.0, 0.0, alignmentResult.getAppliedTurn());
+					action = "ALIGN - " + alignmentResult.getAction();
 				}
 
 				telemetry.addData("MODE", mode + (mode == Mode.MANUAL
@@ -188,29 +125,27 @@ public class BallGroupingAligningTest extends LinearOpMode {
 				telemetry.addData("Target state", target.isValid()
 						? (target.isFresh() ? "FRESH" : "HELD " + target.getAgeMs() + " ms")
 						: "NONE");
-				if (target.isValid() && selectedGroup != null) {
+				telemetry.addData("Control bearing", target.isValid()
+						? String.format("%.2f deg", target.getHorizontalErrorDeg()) : "--");
+				if (selectedGroup != null) {
 					telemetry.addData("Align center tx (mean)", "%.2f deg", selectedGroup.getAverageTxDeg());
-					telemetry.addData("Vision aim tx (weighted)", "%.2f deg", target.getHorizontalErrorDeg());
-					telemetry.addData("Centered",
-							deadband.isBearingCentered(selectedGroup.getAverageTxDeg()) ? "YES" : "no");
 				} else {
 					telemetry.addData("Align center tx (mean)", "--");
-					telemetry.addData("Vision aim tx (weighted)", "--");
-					telemetry.addData("Centered", "--");
 				}
+				telemetry.addData("Correction active", alignmentResult.isCorrectionActive());
 				telemetry.addData("Turn PID (P/I/D)", "%.3f / %.3f / %.3f",
-						turnPid.getLastP(), turnPid.getLastI(), turnPid.getLastD());
-				telemetry.addData("Turn command raw/smoothed", "%.3f / %.3f",
-						requestedTurn, smoothedTurn);
+						alignmentResult.getP(), alignmentResult.getI(), alignmentResult.getD());
+				telemetry.addData("Turn PID raw", "%.3f", alignmentResult.getRawPid());
+				telemetry.addData("Turn command req/applied", "%.3f / %.3f",
+						alignmentResult.getRequestedTurn(), alignmentResult.getAppliedTurn());
+				telemetry.addData("Turn friction/slew", "%s / %s",
+						alignmentResult.isStaticFrictionApplied() ? "YES" : "no",
+						alignmentResult.isSlewLimited() ? "YES" : "no");
 				telemetry.update();
 			}
 		} finally {
 			drivetrain.driveRaw(0.0, 0.0, 0.0);
 			vision.stop();
 		}
-	}
-
-	private static double clamp(double value, double min, double max) {
-		return Math.max(min, Math.min(max, value));
 	}
 }
