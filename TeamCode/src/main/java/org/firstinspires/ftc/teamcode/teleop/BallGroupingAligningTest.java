@@ -50,7 +50,7 @@ public class BallGroupingAligningTest extends LinearOpMode {
 		BallAlignmentController.Result alignmentResult =
 				alignment.update(BallTarget.none(), System.currentTimeMillis(), 0.0);
 
-		telemetry.addLine("Ball group alignment ready - press START");
+		telemetry.addLine("Ball group alignment ready — press START");
 		telemetry.addLine("X=ALIGN  O=MANUAL  Square=green  Triangle=purple  l1/r1=any color");
 		telemetry.update();
 		waitForStart();
@@ -87,6 +87,8 @@ public class BallGroupingAligningTest extends LinearOpMode {
 				if (gamepad1.b && !prevB) {
 					mode = Mode.MANUAL;
 					alignment.reset();
+					alignmentResult = alignment.update(
+							BallTarget.none(), System.currentTimeMillis(), loopDt);
 				} else if (gamepad1.a && !prevA && mode == Mode.MANUAL) {
 					mode = Mode.ALIGN;
 					alignment.reset();
@@ -108,13 +110,13 @@ public class BallGroupingAligningTest extends LinearOpMode {
 							gamepad1.left_stick_y,
 							gamepad1.left_stick_x,
 							gamepad1.right_stick_x);
-					action = "MANUAL - press Cross / A to align";
+					action = "MANUAL — press Cross / A to align";
 				} else {
 					// The controller owns fresh/held target handling and commands an immediate zero
 					// through its invalid-target path, so this test never searches blindly.
 					alignmentResult = alignment.update(target, System.currentTimeMillis(), loopDt);
 					drivetrain.driveRaw(0.0, 0.0, alignmentResult.getAppliedTurn());
-					action = "ALIGN - " + alignmentResult.getAction();
+					action = "ALIGN — " + alignmentResult.getAction();
 				}
 
 				telemetry.addData("MODE", mode + (mode == Mode.MANUAL
