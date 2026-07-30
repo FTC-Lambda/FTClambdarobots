@@ -23,13 +23,13 @@ The feature keeps the existing perception-to-hardware flow but gives the control
 
 `Limelight detections -> BallGrouping -> TargetPersistence -> BallTarget -> BallAlignmentController -> Drivetrain`
 
-`LimelightVision` continues to own detection parsing, filtering, grouping, target arbitration, and target persistence. `BallTarget.getHorizontalErrorDeg()` becomes the only bearing consumed by alignment control. `BallGroupingAligningTest` remains the application and behavioral layer: it polls vision, handles the existing `MANUAL`/`ALIGN` state machine and color controls, passes targets to the controller, applies the returned turn command through `Drivetrain`, and publishes telemetry.
+`LimelightVision` continues to own detection parsing, filtering, grouping, target arbitration, and target persistence. `BallTarget.getHorizontalErrorDeg()` becomes the only bearing consumed by alignment control. `BallGroupingAligningTest` remains the application and behavioral layer: it polls vision, handles the existing `MANUAL`/`ALIGN` state machine and color controls, passes targets to the controller, applies the returned turn command through `Drivetrain`, and publishes telemetry. A separate `Ball-Group Alignment Tuner` Test OpMode uses the same production controller and vision pipeline while allowing an operator to adjust runtime configurations from Driver Station controls.
 
 A new FTC-independent `BallAlignmentController` owns the control state. It composes the existing `PIDController` and `SlewRateLimiter` utilities but uses ball-specific configuration. It also owns correction hysteresis, fresh-frame command expiry, sign-reversal handling, and reset behavior. Keeping this class free of FTC SDK types allows deterministic local unit tests.
 
 ## Ball-Specific Configuration
 
-Add descriptive constants without changing the existing `VISION_SEEK_*` values used by AprilTag OpModes:
+Add descriptive default constants without changing the existing `VISION_SEEK_*` values used by AprilTag OpModes. The production OpMode constructs immutable runtime configuration snapshots from these defaults; the tuner constructs editable snapshots with the same initial values. Editing a tuner value never mutates a global constant or changes another OpMode.
 
 - `BALL_ALIGN_TURN_KP = 0.040`
 - `BALL_ALIGN_TURN_KI = 0.0`
@@ -44,7 +44,7 @@ Add descriptive constants without changing the existing `VISION_SEEK_*` values u
 - `BALL_TARGET_SWITCH_CONFIRM_FRAMES = 3`
 - `BALL_TARGET_AIM_FILTER_GAIN = 0.50`
 
-These are safe initial field-tuning values, not universal drivetrain calibration. The final on-robot procedure changes only these ball-alignment constants if the measured drivetrain breakaway power or response requires adjustment.
+These are safe initial field-tuning values, not universal drivetrain calibration. The tuner displays every active value so the final verified set can be copied into the default constants deliberately after a field session; it does not persist changes across OpMode restarts.
 
 ## Control Behavior
 
@@ -122,6 +122,20 @@ On the third consecutive confirming frame, the challenger becomes the lock, aimp
 - Uses the controller result for motor output and telemetry.
 - Keeps `BallGroup` data only for diagnostic group membership and area telemetry; it does not derive a second control bearing.
 
+### `BallGroupAlignmentTuner`
+
+- Is a separate `@TeleOp` in the Test group named `Ball-Group Alignment Tuner`.
+- Uses the same `LimelightVision`, `TargetPersistence`, `BallAlignmentController`, and `Drivetrain` path as `BallGroupingAligningTest`; it does not duplicate control logic.
+- Maintains editable `BallAlignmentConfig` and `BallTargetingConfig` instances seeded from `Constants` and `BallVisionConfig` defaults.
+- Applies a new alignment configuration by calling `BallAlignmentController.setConfig(...)`, which safely resets transient PID, deadband, command, and slew state. Applies a new target configuration through `LimelightVision`, which clears the current target lock and pending challenger before reacquiring.
+- Never writes preferences, files, or static constants. A tuning session therefore cannot accidentally change autonomous or AprilTag behavior.
+
+### Runtime configuration objects
+
+- `BallAlignmentConfig` contains PID gains, derivative filter, start/stop deadbands, maximum turn power, static-friction power, slew rate, and command-hold timeout.
+- `BallTargetingConfig` contains challenger confirmation-frame count and aim-filter gain.
+- Each configuration validates finite values and bounds them before it reaches a controller: nonnegative gains/powers/rates, `0 < stopDeadband <= startDeadband`, `0 < maxTurnPower <= 1`, `0 <= staticFrictionPower <= maxTurnPower`, positive command hold, confirmation frames in `[1, 10]`, and filter gain in `(0, 1]`.
+
 ### Existing vision classes
 
 - `BallGrouping` continues grouping detections using spatial adjacency and the horizontal span cap.
@@ -148,6 +162,43 @@ The alignment OpMode reports:
 - existing detection, rejection, grouping, color, pipeline, staleness, and latency data.
 
 This separates perception instability from controller behavior during field tuning.
+
+## Driver Station Tuning OpMode
+
+`Ball-Group Alignment Tuner` provides an operator-controlled tuning loop without any external dashboard dependency.
+
+### Controls
+
+- `A`: enter ALIGN; `B`: return to MANUAL and command zero.
+- `X`: prefer green; `Y`: prefer purple; either bumper: clear color preference.
+- D-pad up/down: select the previous/next parameter.
+- D-pad left/right: decrease/increase the selected parameter by its fine increment.
+- Hold the left-stick button while pressing D-pad left/right: use the selected parameter's coarse increment.
+
+The selectable parameters and increments are:
+
+| Parameter | Fine | Coarse |
+| --- | ---: | ---: |
+| turn kP | 0.002 | 0.010 |
+| turn kI | 0.0005 | 0.0020 |
+| turn kD | 0.001 | 0.005 |
+| derivative filter | 0.05 | 0.20 |
+| start deadband (deg) | 0.25 | 1.00 |
+| stop deadband (deg) | 0.25 | 1.00 |
+| maximum turn power | 0.05 | 0.10 |
+| static-friction power | 0.01 | 0.05 |
+| turn slew rate | 0.5 | 2.0 |
+| command hold (ms) | 25 | 100 |
+| switch confirmation frames | 1 | 1 |
+| aim-filter gain | 0.05 | 0.20 |
+
+Changing either deadband clamps the other as needed to maintain `0 < stop <= start`. Changing maximum turn power clamps static-friction power if necessary. Every other value is constrained by the configuration validation rules.
+
+### Display and safe application
+
+Driver Station telemetry always shows the selected parameter, fine/coarse mode, all current configuration values, and the default value for the selected parameter. It also shows the full alignment telemetry: target freshness and age, lock/pending challenger state, raw/filtered bearing, correction state, PID terms, and raw/requested/applied power.
+
+Every button action is edge-triggered. Applying a changed alignment configuration resets the alignment controller and outputs zero for that loop. Applying a changed targeting configuration clears the current target and pending challenger, then reacquires normally. The tuning OpMode uses the same immediate stop behavior as the alignment test when target visibility is lost, the operator exits ALIGN, or the OpMode ends.
 
 ## Error Handling and Safety
 
@@ -182,6 +233,10 @@ Pure-Java tests will verify:
 - a missing current observation holds the old target while a challenger confirms and does not authorize motion beyond 100 ms;
 - filtered aimpoint state resets rather than blending two different group identities;
 - the controller consumes the filtered persisted weighted bearing when arithmetic, raw weighted, and filtered centers differ.
+- configuration validation clamps invalid relationships between deadbands and power limits;
+- changing an alignment configuration resets the controller to zero;
+- changing a targeting configuration clears lock and challenger state;
+- the tuner parameter-selection and fine/coarse adjustment logic changes only the intended configuration field.
 
 ### Repository verification
 
@@ -199,6 +254,7 @@ Run the focused vision/control unit tests, the complete TeamCode unit-test suite
 8. Present two equal-count groups and verify the apparently closer group wins acquisition.
 9. Temporarily change a locked group's detected count or position and verify the lock remains stable.
 10. Make a challenger preferable for fewer than three frames and verify it cannot steal the lock; sustain its advantage for three fresh frames and verify one deliberate switch.
+11. In `Ball-Group Alignment Tuner`, adjust each parameter and verify Driver Station telemetry reflects the new runtime value, the alignment controller safely resets after an alignment setting changes, and the target lock safely reacquires after a targeting setting changes.
 
 ## Out of Scope
 
