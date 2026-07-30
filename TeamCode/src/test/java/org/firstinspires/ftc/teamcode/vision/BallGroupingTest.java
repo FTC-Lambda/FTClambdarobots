@@ -177,6 +177,28 @@ public class BallGroupingTest {
 	}
 
 	@Test
+	public void moreBallsBeatCloserSmallerGroup() {
+		BallGroup threeFar = BallGrouping.buildGroup(Arrays.asList(
+				det("green", 0.8, 12, 0, 0.01, 0, 0, 0, 0, false),
+				det("green", 0.8, 14, 0, 0.01, 0, 0, 0, 0, false),
+				det("green", 0.8, 16, 0, 0.01, 0, 0, 0, 0, false)), null);
+		BallGroup twoNear = BallGrouping.buildGroup(Arrays.asList(
+				det("green", 0.8, -10, 0, 0.05, 0, 0, 0, 0, false),
+				det("green", 0.8, -8, 0, 0.05, 0, 0, 0, 0, false)), null);
+		assertEquals(threeFar,
+				BallGrouping.selectPriorityGroup(Arrays.asList(twoNear, threeFar), null).get());
+	}
+
+	@Test
+	public void equalCountUsesClosenessThenConfidenceThenCenter() {
+		BallGroup farther = BallGrouping.buildGroup(
+				Collections.singletonList(det("green", 0.99, 0, 0, 0.02, 0, 0, 0, 0, false)), null);
+		BallGroup nearer = BallGrouping.buildGroup(
+				Collections.singletonList(det("green", 0.60, 15, 0, 0.03, 0, 0, 0, 0, false)), null);
+		assertTrue(BallGrouping.isHigherPriority(nearer, farther));
+	}
+
+	@Test
 	public void desiredColorSelectionPrefersMatchingGroup() {
 		BallDetection green = det("green", 0.9, 0, 0, 0.03, 160, 120, 40, 40, true);
 		BallDetection purpleFar = det("purple", 0.9, 18, 0, 0.03, 260, 120, 40, 40, true);

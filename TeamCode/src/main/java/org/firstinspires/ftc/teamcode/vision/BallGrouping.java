@@ -314,19 +314,61 @@ public final class BallGrouping {
 		return Math.abs(a.getWeightedTxDeg()) < Math.abs(b.getWeightedTxDeg());
 	}
 
-	/** Closest group by apparent size ({@code ta}); optional colour filter. */
-	public static Optional<BallGroup> selectBestGroup(List<BallGroup> groups) {
-		return selectClosestGroup(groups, null);
+	/** True when {@code candidate} should beat {@code incumbent} for ball acquisition. */
+	public static boolean isHigherPriority(BallGroup candidate, BallGroup incumbent) {
+		if (candidate == null) {
+			return false;
+		}
+		if (incumbent == null) {
+			return true;
+		}
+		if (candidate.getSize() != incumbent.getSize()) {
+			return candidate.getSize() > incumbent.getSize();
+		}
+		int areaCmp = Double.compare(apparentCloseness(candidate), apparentCloseness(incumbent));
+		if (areaCmp != 0) {
+			return areaCmp > 0;
+		}
+		int confCmp = Double.compare(candidate.getAverageConfidence(), incumbent.getAverageConfidence());
+		if (confCmp != 0) {
+			return confCmp > 0;
+		}
+		return Math.abs(candidate.getWeightedTxDeg()) < Math.abs(incumbent.getWeightedTxDeg());
 	}
 
-	/** Closest group by apparent size, preferring groups that contain {@code desiredColor}. */
+	/** Selects a group by ball count, then apparent closeness; optional colour preference. */
+	public static Optional<BallGroup> selectBestGroup(List<BallGroup> groups) {
+		return selectPriorityGroup(groups, null);
+	}
+
+	/** Selects a priority group, preferring groups that contain {@code desiredColor}. */
 	public static Optional<BallGroup> selectBestGroup(List<BallGroup> groups, BallColor desiredColor) {
-		return selectClosestGroup(groups, desiredColor);
+		return selectPriorityGroup(groups, desiredColor);
 	}
 
 	public static Optional<BallGroup> selectClosestGroup(List<BallGroup> groups, BallColor desiredColor) {
+		BallGroup best = null;
+		for (BallGroup g : eligibleGroups(groups, desiredColor)) {
+			if (isCloser(g, best)) {
+				best = g;
+			}
+		}
+		return Optional.ofNullable(best);
+	}
+
+	public static Optional<BallGroup> selectPriorityGroup(List<BallGroup> groups, BallColor desiredColor) {
+		BallGroup best = null;
+		for (BallGroup g : eligibleGroups(groups, desiredColor)) {
+			if (isHigherPriority(g, best)) {
+				best = g;
+			}
+		}
+		return Optional.ofNullable(best);
+	}
+
+	private static List<BallGroup> eligibleGroups(List<BallGroup> groups, BallColor desiredColor) {
 		if (groups == null || groups.isEmpty()) {
-			return Optional.empty();
+			return Collections.emptyList();
 		}
 		List<BallGroup> candidates = groups;
 		if (desiredColor == BallColor.GREEN || desiredColor == BallColor.PURPLE) {
@@ -344,15 +386,6 @@ public final class BallGrouping {
 				candidates = matching;
 			}
 		}
-		BallGroup best = null;
-		for (BallGroup g : candidates) {
-			if (g == null) {
-				continue;
-			}
-			if (isCloser(g, best)) {
-				best = g;
-			}
-		}
-		return Optional.ofNullable(best);
+		return candidates;
 	}
 }
