@@ -37,9 +37,17 @@ motor direction, zero-power behavior, encoder mode, or port assignments in
 
 Vision OpModes use pipeline **0**. Run `Limelight Pipeline Setup` once to make it an
 FTC `aprilClassic36h11` fiducial pipeline, enable its 3D solve, and reset its crop to
-the full sensor frame. The configured tag edge size is **165.1 mm**; measure the
-printed black square and update both `LimelightPipelineSetup` and `AprilTagSeekAuto`
-if that value differs. `AprilTag Seek` also attempts this repair during initialization.
+the full sensor frame. The configured tag edge size is **82.55 mm** (3.25 in, Competition Manual 9.9),
+shared as `Constants.APRILTAG_SIZE_MM` by `LimelightPipelineSetup`, `AprilTagSeekAuto`
+and the HIVE OpModes; measure the printed black square and update that constant if it differs. `AprilTag Seek` also attempts this repair during initialization.
+
+### Camera mount
+
+HIVE state detection converts each tag to a height above the tiles, so it needs the real
+Limelight mounting. MEASURE both on the robot and set `Constants.LIMELIGHT_HEIGHT_IN` (lens
+height above the tiles, in) and `Constants.LIMELIGHT_PITCH_DEG` (upward tilt from horizontal,
+degrees). The camera needs upward pitch to see CELL tags that sit about 30-65 in high. The
+defaults (10 in, 20 deg) are placeholders. Check them with `Hive Height Calibration`.
 
 ## Current scope
 

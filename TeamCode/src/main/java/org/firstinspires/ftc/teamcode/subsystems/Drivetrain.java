@@ -1,5 +1,6 @@
 package org.firstinspires.ftc.teamcode.subsystems;
 
+import com.qualcomm.robotcore.hardware.HardwareMap;
 import org.firstinspires.ftc.teamcode.hardware.RobotHardware;
 import org.firstinspires.ftc.teamcode.util.Constants;
 
@@ -22,6 +23,21 @@ public class Drivetrain {
 
 	public Drivetrain(RobotHardware robot) {
 		this.robot = robot;
+	}
+
+	/**
+	 * Builds a drivetrain from the hardware map, or returns null if the drive motors (or the
+	 * Limelight, which RobotHardware also requires) are missing from the active configuration.
+	 * Lets vision OpModes run on a bench with only the Limelight connected. Sets no power.
+	 */
+	public static Drivetrain tryCreate(HardwareMap hardwareMap) {
+		try {
+			RobotHardware robot = new RobotHardware();
+			robot.init(hardwareMap);
+			return new Drivetrain(robot);
+		} catch (RuntimeException e) {
+			return null;
+		}
 	}
 
 	public void setMotorScale(int motorIndex, double scale) {

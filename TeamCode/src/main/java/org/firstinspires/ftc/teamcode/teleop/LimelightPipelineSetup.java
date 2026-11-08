@@ -6,6 +6,7 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
 import org.firstinspires.ftc.teamcode.hardware.LimelightPipelines;
 import org.firstinspires.ftc.teamcode.hardware.RobotHardware;
+import org.firstinspires.ftc.teamcode.util.Constants;
 
 /**
  * One-time setup OpMode that reconfigures Limelight pipeline 0 into an AprilTag
@@ -35,8 +36,9 @@ public class LimelightPipelineSetup extends LinearOpMode {
 
 	// Physical size of your printed tag = the black square's edge length, IN MILLIMETERS.
 	// This only affects 3D pose/distance accuracy — detection (tx/ty) works even if it's
-	// a little off. MEASURE YOUR TAG and set this. (165.1 mm is the FRC field-tag size.)
-	static final double FIDUCIAL_SIZE_MM = 165.1;
+	// a little off. The size lives in Constants.APRILTAG_SIZE_MM (BIOBUZZ tags are 82.55 mm =
+	// 3.25 in, Competition Manual 9.9; 165.1 mm was the FRC field-tag size).
+	static final double FIDUCIAL_SIZE_MM = Constants.APRILTAG_SIZE_MM;
 
 	private RobotHardware robot;
 

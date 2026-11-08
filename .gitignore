@@ -79,3 +79,6 @@ lint/generated/
 lint/outputs/
 lint/tmp/
 # lint/reports/
+# Official FIRST game documents (large, revised weekly; re-download with docs/game/reference/fetch.sh)
+docs/game/reference/*.pdf
+docs/game/reference/*.zip

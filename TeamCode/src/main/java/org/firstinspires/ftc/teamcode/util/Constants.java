@@ -79,4 +79,21 @@ public final class Constants {
 	// of snapping — protects the drivetrain and smooths out measurement-noise spikes.
 	public static final double VISION_TURN_SLEW_RATE  = 3.0;
 	public static final double VISION_DRIVE_SLEW_RATE = 2.5;
+
+	// --- AprilTag / Limelight mounting (BIOBUZZ) ---
+	// Printed tag edge length in mm: 3.25 in per Competition Manual 9.9. Affects the
+	// Limelight 3D pose/range only. Shared by every OpMode that configures pipeline 0.
+	public static final double APRILTAG_SIZE_MM = 82.55;
+
+	// MEASURE ON ROBOT: height of the Limelight lens above the floor tiles, in inches.
+	public static final double LIMELIGHT_HEIGHT_IN = 10.0;
+	// MEASURE ON ROBOT: upward tilt of the Limelight from horizontal, in degrees
+	// (positive = looking up). Needed to see CELL tags that sit ~30-65 in high.
+	public static final double LIMELIGHT_PITCH_DEG = 20.0;
+	// MEASURE ON ROBOT (HIVE localization only): lens position relative to the robot's
+	// center, in inches, and its yaw from robot-forward in degrees (left = positive).
+	// Leave at 0 for a camera on its own stand; the stand's position is then what's estimated.
+	public static final double LIMELIGHT_FORWARD_IN = 0.0;
+	public static final double LIMELIGHT_LEFT_IN = 0.0;
+	public static final double LIMELIGHT_YAW_DEG = 0.0;
 }
