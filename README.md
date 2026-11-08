@@ -36,10 +36,20 @@ Our code is organized in the [/TeamCode](TeamCode) folder, which contains:
 ### Robot setup references
 
 The code's required Control Hub hardware-map names, ports-to-record checklist, and
-vision setup are in [Hardware configuration](docs/ai/hardware.md). Pedro
+vision setup are in [Hardware configuration](docs/HARDWARE_CONFIGURATION.md). Pedro
 Pathing's active follower/localizer configuration and tuning order are in
-[Pedro Pathing](docs/ai/pedro-pathing.md). The exact registered OpModes are listed in
-[OpModes](docs/ai/opmodes.md).
+[Pedro Pathing](docs/PEDRO_PATHING.md). The exact registered OpModes are listed in
+[OpModes](docs/OPMODES.md).
+
+### Game: BIOBUZZ presented by RTX (2026–2027)
+
+* [BIOBUZZ game digest](docs/game/BIOBUZZ.md): timing, POLLEN/NECTAR, HIVE,
+  FLOWERS, AprilTags, scoring, and the rules that affect our code
+* [Code impact](docs/game/CODE_IMPACT.md): what in this repo still assumes
+  DECODE and what to change, in priority order
+* [Official documents](docs/game/reference/README.md): Competition Manual, Team
+  Updates, field guides, CAD, and printable AprilTags (run `fetch.sh` to
+  download them)
 
 ### Building and Running
 
