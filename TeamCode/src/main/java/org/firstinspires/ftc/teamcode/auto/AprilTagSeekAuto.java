@@ -31,7 +31,7 @@ public class AprilTagSeekAuto extends LinearOpMode {
 	static final int PIPELINE_APRILTAG = 0; // Pipeline 0 must be a Fiducial/AprilTag pipeline
 
 	// Printed tag edge length in mm (affects 3D distance/pose accuracy only). Measure yours.
-	static final double FIDUCIAL_SIZE_MM = 165.1;
+	static final double FIDUCIAL_SIZE_MM = Constants.APRILTAG_SIZE_MM;
 
 	// --- Tunable constants ---
 	static final double SPIN_POWER         = 0.3;   // raw turn power during spin / search

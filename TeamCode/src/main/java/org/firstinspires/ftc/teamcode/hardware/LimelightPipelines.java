@@ -107,7 +107,11 @@ public final class LimelightPipelines {
 		if (pipe == null) return false;                      // device unreachable / no reflection
 		boolean isFiducial = "pipe_fiducial".equals(pipe.optString("pipeline_type", null));
 		boolean threeDEnabled = pipe.optInt("fiducial_skip3d", 0) == 0;
-		if (isFiducial && isFullFrame(pipe) && threeDEnabled) {
+		// The tag size and family must also match. A pipeline left at an old size (e.g. 165.1 mm
+		// from DECODE) still finds tags, but every 3D range comes out scaled by stored/true size.
+		boolean sizeMatches = Math.abs(pipe.optDouble("fiducial_size", -1.0) - sizeMm) < 0.01;
+		boolean familyMatches = family.equals(pipe.optString("fiducial_type", null));
+		if (isFiducial && isFullFrame(pipe) && threeDEnabled && sizeMatches && familyMatches) {
 			return true;                                     // already correct, nothing to write
 		}
 		try {
